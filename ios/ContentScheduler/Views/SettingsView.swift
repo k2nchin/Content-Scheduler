@@ -3,50 +3,81 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppStore.self) private var store
     @Environment(YouTubeService.self) private var youtube
-    @State private var newSlot = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: .now) ?? .now
-    @State private var connecting = false
-    @State private var confirmDisconnect = false
-    @State private var confirmDemo = false
+    @Environment(MetaService.self) private var meta
+    @State private var connectingYT = false
+    @State private var connectingMeta = false
+    @State private var confirmYT = false
+    @State private var confirmMeta = false
 
     var body: some View {
-        @Bindable var store = store
         NavigationStack {
             Screen {
                 AppHeader()
                 PageTitle(kicker: "Tu cuenta", title: "Ajustes")
+
                 SectionLabel(text: "Cuentas conectadas")
                 Card {
-                    Button {
-                        if youtube.isConnected { confirmDisconnect = true } else { connect() }
-                    } label: {
-                        row(.youtube, title: "YouTube",
-                            detail: youtube.channel.map { "Canal: \($0.title)" } ?? (connecting ? "Conectando…" : "Toca para conectar tu canal"),
-                            on: youtube.isConnected)
+                    // YouTube
+                    Button { if youtube.isConnected { confirmYT = true } else { connectYouTube() } } label: {
+                        row(.youtube, "YouTube",
+                            youtube.channel.map { "Canal: \($0.title)" } ?? (connectingYT ? "Conectando…" : "Toca para conectar tu canal"),
+                            youtube.isConnected)
                     }.buttonStyle(.plain)
                     if youtube.isConnected {
                         Divider().overlay(Theme.line)
                         NavigationLink { CommentsView() } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "bubble.left.and.bubble.right.fill").foregroundStyle(Theme.accent).frame(width: 32)
-                            VStack(alignment: .leading) {
-                                Text("Comentarios de YouTube").bold()
-                                Text("Responder y respuestas automáticas").font(.caption).foregroundStyle(Theme.muted)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
-                        }.contentShape(Rectangle())
-                    }.buttonStyle(.plain)
-                    }
-                    ForEach([Network.facebook, .instagram, .tiktok]) { n in
-                        Divider().overlay(Theme.line)
-                        Toggle(isOn: Binding(get: { store.state.demoAccounts[n] ?? false }, set: { store.state.demoAccounts[n] = $0 })) {
                             HStack(spacing: 12) {
-                                NetBadge(network: n, size: 32)
+                                Image(systemName: "bubble.left.and.bubble.right.fill").foregroundStyle(Theme.accent).frame(width: 32)
                                 VStack(alignment: .leading) {
-                                    Text(n.name).bold()
-                                    Text("Modo prueba · aún no publica").font(.caption).foregroundStyle(Theme.muted)
+                                    Text("Comentarios de YouTube").bold()
+                                    Text("Responder y respuestas automáticas").font(.caption).foregroundStyle(Theme.muted)
                                 }
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
+                            }.contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                    }
+
+                    Divider().overlay(Theme.line)
+
+                    // Facebook + Instagram (Meta)
+                    if meta.hasAccount {
+                        row(.facebook, "Facebook", meta.page.map { "Página: \($0.name)" } ?? "", meta.facebookConnected)
+                        Divider().overlay(Theme.line)
+                        row(.instagram, "Instagram",
+                            meta.page?.igUsername.map { "@\($0)" } ?? "Sin cuenta profesional vinculada a la página",
+                            meta.instagramConnected)
+                        if meta.pages.count > 1 {
+                            Picker("Página", selection: Binding(get: { meta.page?.id ?? "" }, set: { meta.selectedPageID = $0 })) {
+                                ForEach(meta.pages) { Text($0.name).tag($0.id) }
+                            }.font(.footnote)
+                        }
+                        if !meta.tokenValid {
+                            Button { connectMeta() } label: { Label("La sesión caducó · Entrar de nuevo con Facebook", systemImage: "arrow.clockwise") }
+                                .font(.footnote.bold()).foregroundStyle(Theme.warn)
+                        }
+                        Button(role: .destructive) { confirmMeta = true } label: { Text("Desconectar Facebook e Instagram").font(.footnote) }
+                    } else {
+                        Button { connectMeta() } label: {
+                            HStack(spacing: 10) {
+                                NetLogo(network: .facebook, size: 18)
+                                Text(connectingMeta ? "Conectando…" : "Continuar con Facebook").bold()
+                                Spacer()
+                                NetLogo(network: .instagram, size: 18)
                             }
+                            .foregroundStyle(.white).padding(14)
+                            .background(Network.facebook.color, in: RoundedRectangle(cornerRadius: 10))
+                        }.buttonStyle(.plain)
+                        Text("Conecta tus páginas de Facebook y la cuenta profesional de Instagram vinculada a ellas.")
+                            .font(.caption).foregroundStyle(Theme.muted)
+                    }
+
+                    Divider().overlay(Theme.line)
+                    HStack(spacing: 12) {
+                        NetBadge(network: .tiktok, size: 32, dimmed: true)
+                        VStack(alignment: .leading) {
+                            Text("TikTok").bold().foregroundStyle(Theme.muted)
+                            Text("Próximamente").font(.caption).foregroundStyle(Theme.muted)
                         }
                     }
                 }
@@ -61,76 +92,46 @@ struct SettingsView: View {
                         }
                     }
                 }
-                SectionLabel(text: "Horarios de publicación")
-                Card {
-                    FlowSlots(slots: store.state.slots.sorted()) { s in
-                        if store.state.slots.count > 1 { store.state.slots.removeAll { $0 == s } }
-                        else { store.show("Deja al menos un horario") }
-                    }
-                    HStack {
-                        DatePicker("Nuevo horario", selection: $newSlot, displayedComponents: .hourAndMinute).labelsHidden()
-                        Spacer()
-                        Button("Agregar") {
-                            let s = newSlot.hm
-                            if !store.state.slots.contains(s) { store.state.slots.append(s); store.show("Horario agregado") }
-                        }.buttonStyle(PrimaryButtonStyle()).frame(width: 130)
-                    }
-                }
 
-                SectionLabel(text: "Avisos por Telegram")
-                Card {
-                    Toggle(isOn: $store.state.telegram) { labeled("Avisos activos", "Qué se programó y qué falló") }
-                    Divider().overlay(Theme.line)
-                    Toggle(isOn: $store.state.viralAlert) { labeled("Video viral", "Cuando un video se dispara") }
-                    Divider().overlay(Theme.line)
-                    Toggle(isOn: $store.state.weeklyReport) { labeled("Reporte del lunes", "Resumen de tu semana") }
-                    Text("Todavía no se envían: falta conectar tu bot de Telegram.").font(.caption).foregroundStyle(Theme.muted)
-                }
-
-                SectionLabel(text: "Datos")
-                Card {
-                    Button { confirmDemo = true } label: {
-                        labeled("Cargar datos de ejemplo", "Reemplaza tu cola por publicaciones de prueba")
-                    }.buttonStyle(.plain)
-                }
                 Text("CONTENT SCHEDULER · iOS").font(Theme.mono).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 20)
             }
-            .confirmationDialog("¿Desconectar YouTube?", isPresented: $confirmDisconnect, titleVisibility: .visible) {
+            .toolbar(.hidden, for: .navigationBar)
+            .confirmationDialog("¿Desconectar YouTube?", isPresented: $confirmYT, titleVisibility: .visible) {
                 Button("Desconectar", role: .destructive) { youtube.disconnect(); store.show("YouTube desconectado") }
             }
-            .confirmationDialog("¿Cargar los datos de ejemplo? Se reemplaza tu cola actual.", isPresented: $confirmDemo, titleVisibility: .visible) {
-                Button("Cargar ejemplo", role: .destructive) { store.loadDemo() }
+            .confirmationDialog("¿Desconectar Facebook e Instagram?", isPresented: $confirmMeta, titleVisibility: .visible) {
+                Button("Desconectar", role: .destructive) { meta.disconnect(); store.show("Facebook e Instagram desconectados") }
             }
         }
     }
 
-    private func connect() {
-        connecting = true
+    private func connectYouTube() {
+        connectingYT = true
         Task {
-            do { try await youtube.connect(); store.show("YouTube conectado") }
-            catch { store.show(error.localizedDescription) }
-            connecting = false
+            do { try await youtube.connect(); store.show("YouTube conectado") } catch { store.show(error.localizedDescription) }
+            connectingYT = false
         }
     }
 
-    private func row(_ n: Network, title: String, detail: String, on: Bool) -> some View {
+    private func connectMeta() {
+        connectingMeta = true
+        Task {
+            do { try await meta.connect(); store.show("Facebook e Instagram conectados") } catch { store.show(error.localizedDescription) }
+            connectingMeta = false
+        }
+    }
+
+    private func row(_ n: Network, _ title: String, _ detail: String, _ on: Bool) -> some View {
         HStack(spacing: 12) {
             NetBadge(network: n, size: 32)
             VStack(alignment: .leading) {
                 Text(title).bold()
-                Text(detail).font(.caption).foregroundStyle(Theme.muted)
+                Text(detail).font(.caption).foregroundStyle(Theme.muted).lineLimit(2)
             }
             Spacer()
             Image(systemName: on ? "checkmark.circle.fill" : "plus.circle").foregroundStyle(on ? Theme.ok : Theme.accent).font(.title3)
         }
         .contentShape(Rectangle())
-    }
-
-    private func labeled(_ title: String, _ detail: String) -> some View {
-        VStack(alignment: .leading) {
-            Text(title).bold()
-            Text(detail).font(.caption).foregroundStyle(Theme.muted)
-        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

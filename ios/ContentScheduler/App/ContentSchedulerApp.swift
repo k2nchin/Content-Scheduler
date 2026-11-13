@@ -5,6 +5,7 @@ import BackgroundTasks
 struct ContentSchedulerApp: App {
     @State private var store = AppStore()
     @State private var youtube = YouTubeService()
+    @State private var meta = MetaService()
     @Environment(\.scenePhase) private var phase
 
     static let refreshID = "com.contentscheduler.app.refresh"
@@ -14,20 +15,21 @@ struct ContentSchedulerApp: App {
             RootView()
                 .environment(store)
                 .environment(youtube)
+                .environment(meta)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
                 .task {
                     _ = await Notifier.requestPermission()
-                    await Publisher.refresh(store: store, yt: youtube)
+                    await Self.sync(store: store, yt: youtube, meta: meta)
                 }
                 .onChange(of: phase) { _, new in
-                    if new == .active { Task { await Publisher.refresh(store: store, yt: youtube) } }
+                    if new == .active { Task { await Self.sync(store: store, yt: youtube, meta: meta) } }
                     if new == .background { Self.scheduleRefresh() }
                 }
         }
         .backgroundTask(.appRefresh(Self.refreshID)) {
             Self.scheduleRefresh()
-            await Self.backgroundWork(store: store, yt: youtube)
+            await Self.backgroundWork(store: store, yt: youtube, meta: meta)
         }
     }
 
@@ -39,7 +41,20 @@ struct ContentSchedulerApp: App {
 
     /// Con la app cerrada: revisa estados de YouTube, comentarios nuevos y responde solo si está activado.
     @MainActor
-    static func backgroundWork(store: AppStore, yt: YouTubeService) async {
+    static func sync(store: AppStore, yt: YouTubeService, meta: MetaService) async {
+        var c: Set<Network> = []
+        if yt.isConnected { c.insert(.youtube) }
+        if meta.facebookConnected { c.insert(.facebook) }
+        if meta.instagramConnected { c.insert(.instagram) }
+        store.connected = c
+        await Publisher.refresh(store: store, yt: yt)
+        await meta.refresh()
+        await Publisher.publishDue(store: store, meta: meta)
+    }
+
+    @MainActor
+    static func backgroundWork(store: AppStore, yt: YouTubeService, meta: MetaService) async {
+        await Publisher.publishDue(store: store, meta: meta)
         guard yt.isConnected else { return }
         await Publisher.refresh(store: store, yt: yt)
         guard let comments = try? await yt.comments() else { return }

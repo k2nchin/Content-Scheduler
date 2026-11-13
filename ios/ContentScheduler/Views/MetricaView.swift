@@ -5,6 +5,7 @@ import Charts
 struct MetricaView: View {
     @Environment(AppStore.self) private var store
     @Environment(YouTubeService.self) private var youtube
+    @Environment(MetaService.self) private var meta
 
     enum Metric: String, CaseIterable { case seguidores = "Seguidores", vistas = "Vistas", meGusta = "Me gusta" }
 
@@ -14,7 +15,30 @@ struct MetricaView: View {
     @State private var metric: Metric = .seguidores
     @State private var refreshing = false
 
-    private var connected: Bool { network == .youtube && youtube.isConnected }
+    private var connected: Bool {
+        switch network {
+        case .youtube: youtube.isConnected
+        case .facebook: meta.facebookConnected
+        case .instagram: meta.instagramConnected
+        case .tiktok: false
+        }
+    }
+    private var accountName: String? {
+        switch network {
+        case .youtube: youtube.channel?.title
+        case .facebook: meta.page?.name
+        case .instagram: meta.page?.igUsername.map { "@" + $0 }
+        case .tiktok: nil
+        }
+    }
+    private var followers: String? {
+        switch network {
+        case .youtube: youtube.channel.map { $0.subscribers.map { compact(Double($0)) } ?? "Oculto" }
+        case .facebook: meta.facebookConnected ? meta.page?.followers.map { compact(Double($0)) } : nil
+        case .instagram: meta.instagramConnected ? meta.page?.igFollowers.map { compact(Double($0)) } : nil
+        case .tiktok: nil
+        }
+    }
 
     var body: some View {
         Screen {
@@ -74,19 +98,19 @@ struct MetricaView: View {
     // MARK: Detalle
 
     @ViewBuilder private var detailView: some View {
-        let ch = connected ? youtube.channel : nil
-        let r = connected ? youtube.recent : nil
+        let r = network == .youtube && connected ? youtube.recent : nil
         VStack(spacing: 0) {
             HStack(spacing: 14) {
                 NetBadge(network: network, size: 52, dimmed: !connected)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(ch?.title ?? "Sin cuenta").font(.title3).lineLimit(1)
+                    Text(connected ? (accountName ?? "Tu cuenta") : "Sin cuenta").font(.title3).lineLimit(1)
                     Text(network.isReal ? network.name : "\(network.name) · próximamente").font(.footnote).foregroundStyle(Theme.muted)
                 }
                 Spacer()
             }.padding(18)
             Divider().overlay(Theme.line)
-            cell("Seguidores", ch?.subscribers.map { compact(Double($0)) } ?? (ch != nil ? "Oculto" : nil), nil)
+            cell("Seguidores", connected ? followers : nil,
+                 network == .instagram && connected ? meta.page?.igMedia.map { "\($0) publicaciones" } : nil)
             Divider().overlay(Theme.line)
             HStack(spacing: 0) {
                 cell("Vistas", r.map { compact(Double($0.views)) }, "últimos \(r?.videos ?? 10) videos")
@@ -110,7 +134,7 @@ struct MetricaView: View {
             HStack(spacing: 0) {
                 ForEach(Metric.allCases, id: \.self) { m in seg(m.rawValue, metric == m) { metric = m } }
             }.overlay(Rectangle().strokeBorder(Theme.line))
-            let points = connected ? youtube.snapshots : []
+            let points = network == .youtube && connected ? youtube.snapshots : []
             if points.count < 2 {
                 Text("—").font(.title).foregroundStyle(Theme.fg)
                 Text(connected ? "La gráfica se llena con una foto por día. Vuelve mañana para ver el cambio." : "Sin cuenta conectada.")
@@ -135,17 +159,20 @@ struct MetricaView: View {
         Box {
             Text("COMPARAR REDES").font(Theme.display(22)).foregroundStyle(Theme.fg)
             ForEach(Network.allCases) { n in
-                let on = n == .youtube && youtube.isConnected
+                let on = n == .youtube ? youtube.isConnected : n == .facebook ? meta.facebookConnected : n == .instagram ? meta.instagramConnected : false
+                let f: String? = n == .youtube ? youtube.channel.map { $0.subscribers.map { compact(Double($0)) } ?? "Oculto" }
+                    : n == .facebook ? meta.page?.followers.map { compact(Double($0)) }
+                    : n == .instagram ? meta.page?.igFollowers.map { compact(Double($0)) } : nil
                 HStack {
                     NetBadge(network: n, dimmed: !on)
                     Text(n.name).font(.subheadline)
                     Spacer()
                     VStack(alignment: .trailing) {
-                        Text(on ? (youtube.channel?.subscribers.map { compact(Double($0)) } ?? "Oculto") : "—").font(.headline)
+                        Text(on ? (f ?? "—") : "—").font(.headline)
                         Text("seguidores").font(.caption2).foregroundStyle(Theme.muted)
                     }
                     VStack(alignment: .trailing) {
-                        Text(on ? (youtube.recent.map { compact(Double($0.views)) } ?? "—") : "—").font(.headline)
+                        Text(on && n == .youtube ? (youtube.recent.map { compact(Double($0.views)) } ?? "—") : "—").font(.headline)
                         Text("vistas recientes").font(.caption2).foregroundStyle(Theme.muted)
                     }.frame(width: 96, alignment: .trailing)
                 }
@@ -194,10 +221,13 @@ struct MetricaView: View {
     }
 
     private func refresh() async {
-        guard youtube.isConnected, !refreshing else { return }
+        guard !refreshing else { return }
         refreshing = true
-        await Publisher.refresh(store: store, yt: youtube)
-        try? await youtube.refreshRecent()
+        await meta.refresh()
+        if youtube.isConnected {
+            await Publisher.refresh(store: store, yt: youtube)
+            try? await youtube.refreshRecent()
+        }
         refreshing = false
     }
 }

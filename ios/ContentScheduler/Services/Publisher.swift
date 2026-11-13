@@ -24,7 +24,7 @@ enum Publisher {
                 $0.status = now ? .published : .scheduled
                 if now { $0.date = .now }
             }
-            store.deleteVideoFile(of: id)
+            if let p = store.post(id), !needsFile(p) { store.deleteVideoFile(of: id) }
             Notifier.send(now ? "Publicado en YouTube" : "Programado en YouTube", post.title)
             store.show(now ? "Publicado en YouTube" : "Subido. YouTube lo publica \(post.date.dayLabel.lowercased()) a las \(post.date.hm)")
         } catch {
@@ -77,6 +77,77 @@ enum Publisher {
                     p.yt?.state = .privateLocked
                 }
             }
+        }
+    }
+
+    // MARK: Facebook e Instagram
+
+    /// El archivo se guarda hasta que todas las redes elegidas lo tengan.
+    static func needsFile(_ p: Post) -> Bool {
+        (p.networks.contains(.youtube) && p.yt?.videoID == nil)
+            || (p.networks.contains(.facebook) && p.fb?.id == nil)
+            || (p.networks.contains(.instagram) && p.ig?.state != .published)
+    }
+
+    static func caption(_ p: Post) -> String { (p.title + "\n\n" + p.tags).trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    static func publishMeta(_ id: UUID, now: Bool, store: AppStore, meta: MetaService) async {
+        guard let p = store.post(id), let file = fileURL(p) else { return }
+        if p.networks.contains(.facebook), meta.facebookConnected, p.fb?.id == nil {
+            store.update(id) { $0.fb = NetInfo(state: .working) }
+            do {
+                let vid = try await meta.publishFacebook(file: file, description: caption(p), at: now ? nil : p.date)
+                let scheduled = !now && p.date > Date.now.addingTimeInterval(10 * 60)
+                store.update(id) { $0.fb = NetInfo(state: scheduled ? .scheduled : .published, id: vid) }
+                Notifier.send(scheduled ? "Programado en Facebook" : "Publicado en Facebook", p.title)
+                store.show(scheduled ? "Programado en Facebook" : "Publicado en Facebook")
+            } catch {
+                store.update(id) { $0.fb = NetInfo(state: .failed, error: error.localizedDescription); $0.status = .error; $0.errorMessage = error.localizedDescription }
+                store.show(error.localizedDescription)
+            }
+        }
+        if p.networks.contains(.instagram), meta.instagramConnected, p.ig?.state != .published {
+            if now || p.date <= Date.now.addingTimeInterval(60) {
+                await publishInstagram(id, store: store, meta: meta)
+            } else {
+                store.update(id) { $0.ig = NetInfo(state: .waiting) }
+            }
+        }
+        settle(id, store: store)
+    }
+
+    static func publishInstagram(_ id: UUID, store: AppStore, meta: MetaService) async {
+        guard let p = store.post(id), let file = fileURL(p) else { return }
+        store.update(id) { $0.ig = NetInfo(state: .working) }
+        do {
+            let mid = try await meta.publishInstagram(file: file, caption: caption(p))
+            store.update(id) { $0.ig = NetInfo(state: .published, id: mid) }
+            Notifier.send("Publicado en Instagram", p.title)
+            store.show("Publicado en Instagram")
+        } catch {
+            store.update(id) { $0.ig = NetInfo(state: .failed, error: error.localizedDescription); $0.status = .error; $0.errorMessage = error.localizedDescription }
+            Notifier.send("No se pudo publicar en Instagram", error.localizedDescription)
+            store.show(error.localizedDescription)
+        }
+        settle(id, store: store)
+    }
+
+    /// Instagram no deja programar: lo que ya tocaba se publica cuando la app abre o despierta.
+    static func publishDue(store: AppStore, meta: MetaService) async {
+        guard meta.instagramConnected else { return }
+        for p in store.state.posts where p.ig?.state == .waiting && p.date <= .now {
+            await publishInstagram(p.id, store: store, meta: meta)
+        }
+    }
+
+    private static func settle(_ id: UUID, store: AppStore) {
+        guard let p = store.post(id) else { return }
+        if !needsFile(p) { store.deleteVideoFile(of: id) }
+        let states = [p.networks.contains(.facebook) ? p.fb?.state : nil, p.networks.contains(.instagram) ? p.ig?.state : nil].compactMap { $0 }
+        if states.contains(.failed) { return }
+        let ytDone = !p.networks.contains(.youtube) || p.yt?.state == .published
+        if ytDone && !states.isEmpty && states.allSatisfy({ $0 == .published }) {
+            store.update(id) { $0.status = .published; $0.errorMessage = nil }
         }
     }
 }

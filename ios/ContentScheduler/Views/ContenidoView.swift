@@ -258,7 +258,9 @@ struct QueueCard: View {
             Text(post.tags).font(.caption2).lineLimit(1).foregroundStyle(Theme.muted)
             HStack(spacing: 4) {
                 ForEach(Network.allCases.filter { post.networks.contains($0) }) { n in
-                    let ok = n == .youtube && post.yt?.videoID != nil
+                    let ok = (n == .youtube && post.yt?.videoID != nil)
+                        || (n == .facebook && (post.fb?.state == .scheduled || post.fb?.state == .published))
+                        || (n == .instagram && post.ig?.state == .published)
                     HStack(spacing: 3) { NetLogo(network: n, size: 10); Text(ok ? "✓" : "") }.font(.system(size: 10, weight: .bold))
                         .foregroundStyle(ok ? Theme.ok : Theme.muted)
                         .padding(.horizontal, 6).padding(.vertical, 3)

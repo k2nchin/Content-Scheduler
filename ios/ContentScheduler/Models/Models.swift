@@ -29,8 +29,8 @@ enum Network: String, Codable, CaseIterable, Identifiable {
     }
     /// Logo de la red (Simple Icons, CC0) en Assets.xcassets.
     var logo: String { "logo-" + rawValue }
-    /// Solo YouTube publica de verdad por ahora.
-    var isReal: Bool { self == .youtube }
+    /// Redes que ya publican de verdad (TikTok todavía no).
+    var isReal: Bool { self != .tiktok }
 }
 
 enum PostStatus: String, Codable {
@@ -66,6 +66,14 @@ struct YTInfo: Codable, Hashable {
     var likes: Int?
 }
 
+/// Estado de la publicación en Facebook o Instagram.
+struct NetInfo: Codable, Hashable {
+    enum State: String, Codable { case working, scheduled, waiting, published, failed }
+    var state: State
+    var id: String?
+    var error: String?
+}
+
 struct Post: Codable, Identifiable, Hashable {
     var id = UUID()
     var title: String
@@ -81,6 +89,8 @@ struct Post: Codable, Identifiable, Hashable {
     var gradient: Int = 0
     var errorMessage: String?
     var yt: YTInfo?
+    var fb: NetInfo?
+    var ig: NetInfo?
 
     var durationText: String { "\(duration / 60):" + String(format: "%02d", duration % 60) }
     var tagList: [String] {

@@ -33,5 +33,6 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLSchemes: ["$(GOOGLE_REVERSED_CLIENT_ID)"]
         GoogleClientID: "$(GOOGLE_IOS_CLIENT_ID)"
+        MetaAppID: "$(META_APP_ID)"
         UIBackgroundModes: [fetch]
         BGTaskSchedulerPermittedIdentifiers: [com.contentscheduler.app.refresh]

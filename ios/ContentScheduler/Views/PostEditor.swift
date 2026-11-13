@@ -5,6 +5,7 @@ struct PostEditor: View {
     let postID: UUID
     @Environment(AppStore.self) private var store
     @Environment(YouTubeService.self) private var youtube
+    @Environment(MetaService.self) private var meta
     @Environment(\.dismiss) private var dismiss
 
     @State private var title = ""
@@ -81,6 +82,7 @@ struct PostEditor: View {
                     }
 
                     if networks.contains(.youtube) { youtubeBox(post) }
+                    if networks.contains(.facebook) || networks.contains(.instagram) { metaBox(post) }
 
                     DatePicker("Día y hora", selection: $date, displayedComponents: [.date, .hourAndMinute])
                         .environment(\.locale, Locale(identifier: "es"))
@@ -162,9 +164,45 @@ struct PostEditor: View {
         }
     }
 
+    @ViewBuilder private func metaBox(_ post: Post) -> some View {
+        Card {
+            ForEach([Network.facebook, .instagram].filter { networks.contains($0) }) { n in
+                let info = n == .facebook ? post.fb : post.ig
+                let connected = n == .facebook ? meta.facebookConnected : meta.instagramConnected
+                HStack(alignment: .top, spacing: 12) {
+                    NetBadge(network: n, size: 30)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(metaTitle(n, info, connected)).bold()
+                        Text(metaDetail(n, info, connected)).font(.caption).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+        }
+    }
+
+    private func metaTitle(_ n: Network, _ i: NetInfo?, _ connected: Bool) -> String {
+        switch i?.state {
+        case .working: "Publicando en \(n.name)…"
+        case .scheduled: "Programado en \(n.name)"
+        case .waiting: "Esperando la hora"
+        case .published: "Publicado en \(n.name)"
+        case .failed: "No se pudo publicar"
+        case nil: connected ? "Listo para \(n.name)" : "\(n.name) sin conectar"
+        }
+    }
+
+    private func metaDetail(_ n: Network, _ i: NetInfo?, _ connected: Bool) -> String {
+        if let e = i?.error { return e }
+        if i?.state == .waiting { return "Instagram no deja programar: se publica a la hora si la app está abierta o despierta en segundo plano." }
+        if i == nil && !connected { return "Toca «Continuar con Facebook» en Ajustes." }
+        if i == nil && n == .instagram { return "Se publica a la hora elegida (Instagram no permite programar por API)." }
+        if i == nil { return "Facebook lo programa y lo publica solo a la hora elegida." }
+        return ""
+    }
+
     private func saveLabel(_ post: Post) -> String {
-        networks.contains(.youtube) && post.yt?.videoID == nil && Publisher.fileURL(post) != nil && youtube.isConnected
-            ? "Guardar y subir a YouTube" : "Guardar"
+        Publisher.fileURL(post) != nil && ((networks.contains(.youtube) && post.yt?.videoID == nil && youtube.isConnected) || wantsMeta)
+            ? "Guardar y programar" : "Guardar"
     }
 
     private func load() {
@@ -184,35 +222,43 @@ struct PostEditor: View {
         return (before.title != after.title || before.tags != after.tags || before.date != after.date, after)
     }
 
+    private var wantsMeta: Bool {
+        (networks.contains(.facebook) && meta.facebookConnected) || (networks.contains(.instagram) && meta.instagramConnected)
+    }
+
     private func save(_ current: Post) {
         guard !networks.isEmpty else { return store.show("Elige al menos una red") }
         let uploaded = current.yt?.videoID != nil
-        if networks.contains(.youtube) && !uploaded && date < Date.now.addingTimeInterval(-60) {
+        if (networks.contains(.youtube) && !uploaded || wantsMeta) && date < Date.now.addingTimeInterval(-60) {
             return store.show("Esa hora ya pasó. Elige otra o usa Publicar ya.")
         }
         guard let result = write() else { return }
         let changed = result.changed, p = result.post
         if p.status == .error { store.update(postID) { $0.status = .scheduled; $0.errorMessage = nil } }
         dismiss()
-        guard networks.contains(.youtube), youtube.isConnected else { return store.show("Guardado") }
-        if !uploaded, Publisher.fileURL(p) != nil {
-            Task { await Publisher.upload(postID, now: false, store: store, yt: youtube) }
-        } else if uploaded, changed, p.yt?.state != .published {
-            Task { await Publisher.update(postID, now: false, store: store, yt: youtube) }
-        } else {
-            store.show("Guardado")
+        let ytUpload = networks.contains(.youtube) && youtube.isConnected && !uploaded && Publisher.fileURL(p) != nil
+        let ytUpdate = networks.contains(.youtube) && youtube.isConnected && uploaded && changed && p.yt?.state != .published
+        let metaNow = wantsMeta && Publisher.fileURL(p) != nil
+        if !ytUpload && !ytUpdate && !metaNow { return store.show("Guardado") }
+        let (store, youtube, meta, id) = (store, youtube, meta, postID)
+        Task {
+            if ytUpload { await Publisher.upload(id, now: false, store: store, yt: youtube) }
+            if ytUpdate { await Publisher.update(id, now: false, store: store, yt: youtube) }
+            if metaNow { await Publisher.publishMeta(id, now: false, store: store, meta: meta) }
         }
     }
 
     private func publishNow(_ current: Post) {
         guard write() != nil else { return }
         dismiss()
-        if networks.contains(.youtube), youtube.isConnected {
-            if current.yt?.videoID != nil { Task { await Publisher.update(postID, now: true, store: store, yt: youtube) }; return }
-            if Publisher.fileURL(current) != nil { Task { await Publisher.upload(postID, now: true, store: store, yt: youtube) }; return }
+        let (store, youtube, meta, id) = (store, youtube, meta, postID)
+        let yt = networks.contains(.youtube) && youtube.isConnected
+        let hasFile = Publisher.fileURL(current) != nil
+        Task {
+            if yt && current.yt?.videoID != nil { await Publisher.update(id, now: true, store: store, yt: youtube) }
+            else if yt && hasFile { await Publisher.upload(id, now: true, store: store, yt: youtube) }
+            if wantsMeta && hasFile { await Publisher.publishMeta(id, now: true, store: store, meta: meta) }
         }
-        store.update(postID) { $0.status = .published; $0.date = .now; $0.errorMessage = nil }
-        store.show("Marcado como publicado (otras redes: modo prueba)")
     }
 
     private func approval(_ current: Post) {
