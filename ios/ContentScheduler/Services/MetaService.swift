@@ -76,7 +76,13 @@ final class MetaService: NSObject {
         guard let token = params["access_token"] else {
             throw YTError(message: params["error_description"]?.replacingOccurrences(of: "+", with: " ") ?? "No se dio permiso en Facebook.")
         }
-        UserDefaults.standard.set(Date.now.addingTimeInterval(Double(params["expires_in"] ?? "") ?? 3600).timeIntervalSince1970, forKey: "meta.expiry")
+        // Facebook a veces manda expires_in = 0 (sin caducidad corta): en ese caso se usa la fecha de acceso a datos o 60 días.
+        var seconds = Double(params["expires_in"] ?? "") ?? 0
+        if seconds <= 0, let access = Double(params["data_access_expiration_time"] ?? ""), access > Date.now.timeIntervalSince1970 {
+            seconds = access - Date.now.timeIntervalSince1970
+        }
+        if seconds <= 0 { seconds = 60 * 86_400 }
+        UserDefaults.standard.set(Date.now.addingTimeInterval(seconds).timeIntervalSince1970, forKey: "meta.expiry")
         try await loadPages(userToken: token)
     }
 
@@ -251,7 +257,7 @@ final class MetaService: NSObject {
         let e = json["error"] as? [String: Any] ?? (json["debug_info"] as? [String: Any]) ?? [:]
         let code = e["code"] as? Int ?? 0
         let msg = e["error_user_msg"] as? String ?? e["message"] as? String ?? "error desconocido"
-        if code == 190 { return YTError(message: "La sesión de Facebook caducó. Toca «Continuar con Facebook» en Ajustes.") }
+        if code == 190 { return YTError(message: "Facebook no aceptó la sesión (\(msg)). Toca «Continuar con Facebook» en Ajustes.") }
         if code == 10 || code == 200 { return YTError(message: "Falta un permiso de Meta: \(msg)") }
         return YTError(message: "Meta: \(msg)")
     }
