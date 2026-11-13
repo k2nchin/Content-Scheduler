@@ -1,9 +1,12 @@
 import SwiftUI
+import PhotosUI
 
 struct ClipsView: View {
     @Environment(AppStore.self) private var store
     @Environment(YouTubeService.self) private var youtube
     @State private var link = ""
+    @State private var pick: PhotosPickerItem?
+    @State private var source = ""
     @State private var moments: [Moment] = []
     @State private var added: Set<UUID> = []
 
@@ -12,7 +15,24 @@ struct ClipsView: View {
     var body: some View {
         NavigationStack {
             Screen {
-                ScreenTitle(solid: "Clips", outline: "IA", subtitle: "Pega el link de tu en vivo y se marcan los momentos de meme y los virales.")
+                ScreenTitle(solid: "Clips", outline: "IA", subtitle: "Sube un video o pega el link de tu en vivo. Se marcan los momentos de meme y los virales.")
+                PhotosPicker(selection: $pick, matching: .videos) {
+                    VStack(spacing: 6) {
+                        Image(systemName: "icloud.and.arrow.up").font(.title).foregroundStyle(Theme.accent)
+                        Text("Subir video largo o en vivo").bold()
+                        Text("Se queda en tu teléfono").font(.footnote).foregroundStyle(Theme.muted)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 22)
+                    .background(Theme.bg2, in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1.5, dash: [6])))
+                }
+                .onChange(of: pick) { _, item in
+                    guard item != nil else { return }
+                    pick = nil
+                    source = "video del teléfono"
+                    makeMoments(seed: UInt64(Date.now.timeIntervalSince1970) % 997)
+                }
+                Text("o pega un link").font(.caption).foregroundStyle(Theme.muted)
                 HStack {
                     TextField("https://youtube.com/live/…", text: $link)
                         .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -21,6 +41,7 @@ struct ClipsView: View {
                         .background(Theme.accent, in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
                 }
                 if !moments.isEmpty {
+                    SectionLabel(text: "Momentos encontrados · \(source.prefix(28))")
                     DemoBanner(text: "Momentos de ejemplo. El análisis real con IA todavía no está conectado en la app.")
                     Card {
                         ForEach(moments) { m in
@@ -61,7 +82,12 @@ struct ClipsView: View {
 
     private func analyze() {
         guard link.hasPrefix("http") else { return store.show("Pega un link válido") }
-        var gen = SeededRandom(seed: UInt64(link.count * 13))
+        source = link.replacingOccurrences(of: "https://", with: "").replacingOccurrences(of: "www.", with: "")
+        makeMoments(seed: UInt64(link.count * 13))
+    }
+
+    private func makeMoments(seed: UInt64) {
+        var gen = SeededRandom(seed: seed)
         let quotes = ["¡No puede ser, se cayó el micro!", "Esta parte la tienen que escuchar", "El chat se volvió loco con esto",
                       "Cuando te equivocas de letra en vivo", "La nota más alta de la noche"]
         moments = quotes.enumerated().map { i, q in
