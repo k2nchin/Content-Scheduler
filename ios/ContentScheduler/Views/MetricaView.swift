@@ -84,8 +84,10 @@ struct MetricaView: View {
                 Label("Actualizar solo cada 3 min", systemImage: "clock.arrow.2.circlepath").font(.footnote)
             }
 
+            if network == .youtube { YTAccountPicker() }
             if compare { compareView } else { detailView }
         }
+        .onChange(of: youtube.activeID) { _, _ in Task { await refresh() } }
         .task(id: auto) {
             await refresh()
             while auto && !Task.isCancelled {

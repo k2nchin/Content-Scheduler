@@ -296,3 +296,30 @@ struct Box<Content: View>: View {
 }
 
 extension UUID: @retroactive Identifiable { public var id: UUID { self } }
+
+
+/// Elegir con qué cuenta de YouTube trabajar (si hay más de una).
+struct YTAccountPicker: View {
+    @Environment(YouTubeService.self) private var youtube
+    var body: some View {
+        if youtube.accounts.count > 1, let active = youtube.channel {
+            Menu {
+                ForEach(youtube.accounts, id: \.id) { a in
+                    Button { youtube.setActive(a.id) } label: {
+                        if a.id == active.id { Label(a.title, systemImage: "checkmark") } else { Text(a.title) }
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    NetBadge(network: .youtube, size: 22)
+                    Text(active.title).font(.subheadline.bold()).lineLimit(1)
+                    Spacer()
+                    Text("Cambiar").font(.caption).foregroundStyle(Theme.muted)
+                    Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(Theme.muted)
+                }
+                .padding(12).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+            }
+            .foregroundStyle(Theme.fg)
+        }
+    }
+}

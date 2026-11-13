@@ -113,7 +113,7 @@ struct PostEditor: View {
                 if let post, let vid = post.yt?.videoID, post.yt?.state != .published {
                     Button("Eliminar aquí y en YouTube", role: .destructive) {
                         Task {
-                            do { try await youtube.delete(videoID: vid); store.remove(postID); dismiss() }
+                            do { try await youtube.delete(videoID: vid, account: post.yt?.account); store.remove(postID); dismiss() }
                             catch { store.show(error.localizedDescription) }
                         }
                     }

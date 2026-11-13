@@ -64,6 +64,8 @@ struct YTInfo: Codable, Hashable {
     var error: String?
     var views: Int?
     var likes: Int?
+    /// Canal de YouTube al que se subió.
+    var account: String?
 }
 
 /// Estado de la publicación en Facebook o Instagram.

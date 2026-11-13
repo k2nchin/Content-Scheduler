@@ -5,6 +5,7 @@ import PhotosUI
 struct ContenidoView: View {
     @Environment(AppStore.self) private var store
     @Environment(YouTubeService.self) private var youtube
+    @Environment(MetaService.self) private var meta
 
     enum Filter: String, CaseIterable { case todos = "Todos", porProgramar = "Por programar", programados = "Programados", errores = "Errores" }
 
@@ -126,18 +127,29 @@ struct ContenidoView: View {
             }.buttonStyle(.plain)
             if clientsOpen {
                 let week = Date.now.addingTimeInterval(7 * 86_400)
-                if let ch = youtube.channel {
-                    let n = store.programados.filter { $0.date <= week }.count
-                    HStack {
-                        NetBadge(network: .youtube)
-                        Text(ch.title).font(.subheadline)
-                        Spacer()
-                        Text(n == 0 ? "Sin contenido" : "\(n) programados").font(.caption.bold()).foregroundStyle(n == 0 ? Theme.warn : Theme.ok)
-                    }
-                } else {
+                ForEach(youtube.accounts, id: \.id) { acc in
+                    let n = store.programados.filter { $0.date <= week && ($0.yt?.account ?? youtube.channel?.id) == acc.id }.count
+                    clientRow(.youtube, acc.title, n)
+                }
+                if meta.facebookConnected, let page = meta.page {
+                    clientRow(.facebook, page.name, store.upcoming.filter { $0.date <= week && $0.fb?.state == .scheduled }.count)
+                }
+                if meta.instagramConnected, let ig = meta.page?.igUsername {
+                    clientRow(.instagram, "@" + ig, store.upcoming.filter { $0.date <= week && $0.ig?.state == .waiting }.count)
+                }
+                if youtube.accounts.isEmpty && !meta.hasAccount {
                     Text("Conecta tus cuentas en Ajustes para verlas aquí.").font(.caption).foregroundStyle(Theme.muted)
                 }
             }
+        }
+    }
+
+    private func clientRow(_ n: Network, _ name: String, _ count: Int) -> some View {
+        HStack {
+            NetBadge(network: n)
+            Text(name).font(.subheadline).lineLimit(1)
+            Spacer()
+            Text(count == 0 ? "Sin contenido" : "\(count) programados").font(.caption.bold()).foregroundStyle(count == 0 ? Theme.warn : Theme.ok)
         }
     }
 

@@ -6,7 +6,7 @@ struct SettingsView: View {
     @Environment(MetaService.self) private var meta
     @State private var connectingYT = false
     @State private var connectingMeta = false
-    @State private var confirmYT = false
+    @State private var closing: YTChannel?
     @State private var confirmMeta = false
 
     var body: some View {
@@ -17,11 +17,30 @@ struct SettingsView: View {
 
                 SectionLabel(text: "Cuentas conectadas")
                 Card {
-                    // YouTube
-                    Button { if youtube.isConnected { confirmYT = true } else { connectYouTube() } } label: {
-                        row(.youtube, "YouTube",
-                            youtube.channel.map { "Canal: \($0.title)" } ?? (connectingYT ? "Conectando…" : "Toca para conectar tu canal"),
-                            youtube.isConnected)
+                    // YouTube: varias cuentas
+                    ForEach(youtube.accounts, id: \.id) { acc in
+                        HStack(spacing: 12) {
+                            NetBadge(network: .youtube, size: 32)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(acc.title).bold().lineLimit(1)
+                                Text(acc.id == youtube.channel?.id ? "Cuenta activa" : "Toca para usar esta cuenta")
+                                    .font(.caption).foregroundStyle(acc.id == youtube.channel?.id ? Theme.ok : Theme.muted)
+                            }
+                            Spacer()
+                            Button { closing = acc } label: { Text("Cerrar sesión").font(.caption.bold()) }
+                                .foregroundStyle(Theme.red).buttonStyle(.borderless)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { youtube.setActive(acc.id) }
+                        Divider().overlay(Theme.line)
+                    }
+                    Button { connectYouTube() } label: {
+                        HStack(spacing: 12) {
+                            NetBadge(network: .youtube, size: 32, dimmed: youtube.isConnected)
+                            Text(connectingYT ? "Conectando…" : youtube.isConnected ? "Agregar otra cuenta de YouTube" : "Conectar YouTube").bold()
+                            Spacer()
+                            Image(systemName: "plus.circle").foregroundStyle(Theme.accent).font(.title3)
+                        }.contentShape(Rectangle())
                     }.buttonStyle(.plain)
                     if youtube.isConnected {
                         Divider().overlay(Theme.line)
@@ -96,9 +115,12 @@ struct SettingsView: View {
                 Text("CONTENT SCHEDULER · iOS").font(Theme.mono).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 20)
             }
             .toolbar(.hidden, for: .navigationBar)
-            .confirmationDialog("¿Desconectar YouTube?", isPresented: $confirmYT, titleVisibility: .visible) {
-                Button("Desconectar", role: .destructive) { youtube.disconnect(); store.show("YouTube desconectado") }
-            }
+            .confirmationDialog("¿Cerrar sesión de \(closing?.title ?? "esta cuenta")?", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } }), titleVisibility: .visible) {
+                Button("Cerrar sesión", role: .destructive) {
+                    if let c = closing { youtube.disconnect(c.id); store.show("Sesión cerrada: \(c.title)") }
+                    closing = nil
+                }
+            } message: { Text("Solo se cierra esta cuenta. Lo que ya está programado en YouTube se queda allá.") }
             .confirmationDialog("¿Desconectar Facebook e Instagram?", isPresented: $confirmMeta, titleVisibility: .visible) {
                 Button("Desconectar", role: .destructive) { meta.disconnect(); store.show("Facebook e Instagram desconectados") }
             }

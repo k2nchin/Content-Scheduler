@@ -20,7 +20,7 @@ enum Publisher {
                 store.update(id) { $0.yt?.progress = min(p, 0.99) }
             }
             store.update(id) {
-                $0.yt = YTInfo(videoID: videoID, state: now ? .published : .scheduled, progress: 1)
+                $0.yt = YTInfo(videoID: videoID, state: now ? .published : .scheduled, progress: 1, account: yt.channel?.id)
                 $0.status = now ? .published : .scheduled
                 if now { $0.date = .now }
             }
@@ -51,11 +51,18 @@ enum Publisher {
 
     static func refresh(store: AppStore, yt: YouTubeService) async {
         guard yt.isConnected else { return }
-        try? await yt.refreshChannel()
-        let ids = store.state.posts.compactMap { $0.yt?.videoID }
-        guard !ids.isEmpty, let states = try? await yt.states(for: ids) else { return }
+        for acc in yt.accounts { try? await yt.refreshChannel(account: acc.id) }
+        // Revisar cada video con la cuenta que lo subió
+        var states: [String: YouTubeService.VideoState] = [:]
+        let byAccount = Dictionary(grouping: store.state.posts.filter { $0.yt?.videoID != nil }) { $0.yt?.account ?? yt.channel?.id ?? "" }
+        for (acc, posts) in byAccount where yt.accounts.contains(where: { $0.id == acc }) {
+            if let s = try? await yt.states(for: posts.compactMap { $0.yt?.videoID }, account: acc) { states.merge(s) { a, _ in a } }
+            else { return }
+        }
         for post in store.state.posts {
             guard let vid = post.yt?.videoID else { continue }
+            guard byAccount.keys.contains(post.yt?.account ?? yt.channel?.id ?? ""),
+                  yt.accounts.contains(where: { $0.id == (post.yt?.account ?? yt.channel?.id) }) else { continue }
             store.update(post.id) { p in
                 guard let s = states[vid] else {
                     p.yt?.state = .failed

@@ -38,6 +38,7 @@ struct CommentsView: View {
             if !youtube.isConnected {
                 DemoBanner(text: "Conecta YouTube en Ajustes para ver y responder tus comentarios.", icon: "info.circle")
             } else {
+                YTAccountPicker()
                 HStack(spacing: 10) {
                     stat("Pendientes", pending.count)
                     stat("Spam", spam.count)
@@ -91,7 +92,7 @@ struct CommentsView: View {
         }
         .toolbar(.hidden, for: .navigationBar)
         .refreshable { await load() }
-        .task { await load() }
+        .task(id: youtube.activeID) { comments = []; await load() }
         .sheet(isPresented: $editing) {
             RulesEditor(templates: $templatesRaw, rules: $rulesRaw, blocked: $blockedRaw, skipBlocked: $skipBlocked)
         }

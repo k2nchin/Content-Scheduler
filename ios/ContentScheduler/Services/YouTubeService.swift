@@ -22,11 +22,13 @@ struct YTError: LocalizedError {
 @Observable
 @MainActor
 final class YouTubeService: NSObject {
-    private(set) var channel: YTChannel?
+    /// Todas las cuentas de YouTube conectadas; se trabaja con la activa.
+    private(set) var accounts: [YTChannel] = []
+    var activeID: String? { didSet { UserDefaults.standard.set(activeID, forKey: "yt.active") } }
+    var channel: YTChannel? { accounts.first { $0.id == activeID } ?? accounts.first }
     var isConnected: Bool { channel != nil }
 
-    private var accessToken: String?
-    private var tokenExpiry = Date.distantPast
+    private var tokens: [String: (token: String, exp: Date)] = [:]
     private let scope = "https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.force-ssl"
     private var authSession: ASWebAuthenticationSession?
 
@@ -37,15 +39,30 @@ final class YouTubeService: NSObject {
 
     override init() {
         super.init()
-        if let data = UserDefaults.standard.data(forKey: "yt.channel") { channel = try? JSONDecoder().decode(YTChannel.self, from: data) }
+        let d = UserDefaults.standard
+        if let data = d.data(forKey: "yt.accounts"), let list = try? JSONDecoder().decode([YTChannel].self, from: data) {
+            accounts = list
+        } else if let data = d.data(forKey: "yt.channel"), let old = try? JSONDecoder().decode(YTChannel.self, from: data) {
+            // Pasar la cuenta única de versiones anteriores a la lista de cuentas
+            accounts = [old]
+            if let r = Keychain.get("yt.refresh") { Keychain.set(r, for: "yt.refresh.\(old.id)"); Keychain.delete("yt.refresh") }
+            saveAccounts()
+        }
+        activeID = d.string(forKey: "yt.active") ?? accounts.first?.id
     }
 
-    private func saveChannel() {
-        UserDefaults.standard.set(channel.flatMap { try? JSONEncoder().encode($0) }, forKey: "yt.channel")
+    private func saveAccounts() {
+        UserDefaults.standard.set(try? JSONEncoder().encode(accounts), forKey: "yt.accounts")
     }
 
-    // MARK: Conectar / desconectar
+    func setActive(_ id: String) {
+        activeID = id
+        recent = nil
+    }
 
+    // MARK: Conectar / cerrar sesión
+
+    /// Agrega una cuenta de YouTube (o vuelve a conectar una que ya estaba) y la deja activa.
     func connect() async throws {
         guard isConfigured else {
             throw YTError(message: "Falta el ID de cliente de Google para iOS en Config.xcconfig.")
@@ -60,7 +77,7 @@ final class YouTubeService: NSObject {
             .init(name: "scope", value: scope),
             .init(name: "code_challenge", value: challenge),
             .init(name: "code_challenge_method", value: "S256"),
-            .init(name: "prompt", value: "consent"),
+            .init(name: "prompt", value: "select_account consent"),
         ]
         let callback: URL = try await withCheckedThrowingContinuation { cont in
             let session = ASWebAuthenticationSession(url: comps.url!, callbackURLScheme: redirectScheme) { url, error in
@@ -69,6 +86,7 @@ final class YouTubeService: NSObject {
                 }
             }
             session.presentationContextProvider = self
+            session.prefersEphemeralWebBrowserSession = true
             authSession = session
             session.start()
         }
@@ -76,24 +94,32 @@ final class YouTubeService: NSObject {
         guard let code = items.first(where: { $0.name == "code" })?.value else {
             throw YTError(message: "No se dio permiso para YouTube.")
         }
-        let token = try await tokenRequest([
+        let t = try await tokenRequest([
             "client_id": clientID, "code": code, "code_verifier": verifier,
             "grant_type": "authorization_code", "redirect_uri": redirectURI,
         ])
-        if let refresh = token.refresh_token { Keychain.set(refresh, for: "yt.refresh") }
-        try await refreshChannel()
+        let ch = try await fetchChannel(token: t.access_token)
+        if let refresh = t.refresh_token { Keychain.set(refresh, for: "yt.refresh.\(ch.id)") }
+        tokens[ch.id] = (t.access_token, Date.now.addingTimeInterval(Double(t.expires_in - 60)))
+        if let i = accounts.firstIndex(where: { $0.id == ch.id }) { accounts[i] = ch } else { accounts.append(ch) }
+        saveAccounts()
+        setActive(ch.id)
     }
 
-    func disconnect() {
-        if let refresh = Keychain.get("yt.refresh") {
+    /// Cierra sesión solo en la cuenta indicada (o la activa).
+    func disconnect(_ id: String? = nil) {
+        guard let id = id ?? channel?.id else { return }
+        if let refresh = Keychain.get("yt.refresh.\(id)") {
             var req = URLRequest(url: URL(string: "https://oauth2.googleapis.com/revoke?token=\(refresh)")!)
             req.httpMethod = "POST"
             URLSession.shared.dataTask(with: req).resume()
         }
-        Keychain.delete("yt.refresh")
-        accessToken = nil
-        channel = nil
-        saveChannel()
+        Keychain.delete("yt.refresh.\(id)")
+        tokens[id] = nil
+        accounts.removeAll { $0.id == id }
+        UserDefaults.standard.removeObject(forKey: "yt.snapshots.\(id)")
+        saveAccounts()
+        if activeID == id { activeID = accounts.first?.id; recent = nil }
     }
 
     // MARK: Tokens
@@ -108,27 +134,28 @@ final class YouTubeService: NSObject {
             .joined(separator: "&").data(using: .utf8)
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard (resp as? HTTPURLResponse)?.statusCode == 200, let t = try? JSONDecoder().decode(TokenResponse.self, from: data) else {
-            throw YTError(message: "Google no aceptó la conexión. Vuelve a conectar YouTube en Ajustes.")
+            throw YTError(message: "Google no aceptó la conexión. Vuelve a conectar esa cuenta de YouTube en Ajustes.")
         }
-        accessToken = t.access_token
-        tokenExpiry = Date.now.addingTimeInterval(Double(t.expires_in - 60))
         return t
     }
 
-    private func token() async throws -> String {
-        if let accessToken, Date.now < tokenExpiry { return accessToken }
-        guard let refresh = Keychain.get("yt.refresh") else {
-            throw YTError(message: "Conecta YouTube en Ajustes.")
+    private func token(for account: String? = nil) async throws -> String {
+        guard let id = account ?? channel?.id else { throw YTError(message: "Conecta YouTube en Ajustes.") }
+        if let c = tokens[id], Date.now < c.exp { return c.token }
+        guard let refresh = Keychain.get("yt.refresh.\(id)") else {
+            throw YTError(message: "Esa cuenta de YouTube ya no está conectada. Conéctala de nuevo en Ajustes.")
         }
-        return try await tokenRequest(["client_id": clientID, "refresh_token": refresh, "grant_type": "refresh_token"]).access_token
+        let t = try await tokenRequest(["client_id": clientID, "refresh_token": refresh, "grant_type": "refresh_token"])
+        tokens[id] = (t.access_token, Date.now.addingTimeInterval(Double(t.expires_in - 60)))
+        return t.access_token
     }
 
     // MARK: API
 
-    private func api(_ method: String, _ path: String, body: [String: Any]? = nil) async throws -> [String: Any] {
+    private func api(_ method: String, _ path: String, body: [String: Any]? = nil, account: String? = nil) async throws -> [String: Any] {
         var req = URLRequest(url: URL(string: "https://www.googleapis.com/youtube/v3/" + path)!)
         req.httpMethod = method
-        req.setValue("Bearer \(try await token())", forHTTPHeaderField: "Authorization")
+        req.setValue("Bearer \(try await token(for: account))", forHTTPHeaderField: "Authorization")
         if let body {
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -159,8 +186,7 @@ final class YouTubeService: NSObject {
         }
     }
 
-    func refreshChannel() async throws {
-        let json = try await api("GET", "channels?part=snippet,statistics&mine=true")
+    private static func parseChannel(_ json: [String: Any]) throws -> YTChannel {
         guard let item = (json["items"] as? [[String: Any]])?.first,
               let id = item["id"] as? String,
               let snippet = item["snippet"] as? [String: Any],
@@ -168,10 +194,26 @@ final class YouTubeService: NSObject {
             throw YTError(message: "Esta cuenta de Google no tiene canal de YouTube.")
         }
         let num = { (k: String) in Int(stats[k] as? String ?? "") ?? 0 }
-        channel = YTChannel(id: id, title: snippet["title"] as? String ?? "Tu canal",
-                            subscribers: (stats["hiddenSubscriberCount"] as? Bool) == true ? nil : num("subscriberCount"),
-                            views: num("viewCount"), videos: num("videoCount"), checked: .now)
-        saveChannel()
+        return YTChannel(id: id, title: snippet["title"] as? String ?? "Tu canal",
+                         subscribers: (stats["hiddenSubscriberCount"] as? Bool) == true ? nil : num("subscriberCount"),
+                         views: num("viewCount"), videos: num("videoCount"), checked: .now)
+    }
+
+    private func fetchChannel(token: String) async throws -> YTChannel {
+        var req = URLRequest(url: URL(string: "https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true")!)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else { throw Self.error(status: status, json: json) }
+        return try Self.parseChannel(json)
+    }
+
+    /// Actualiza los números de una cuenta (o de la activa).
+    func refreshChannel(account: String? = nil) async throws {
+        guard let id = account ?? channel?.id else { return }
+        let ch = try Self.parseChannel(try await api("GET", "channels?part=snippet,statistics&mine=true", account: id))
+        if let i = accounts.firstIndex(where: { $0.id == id }) { accounts[i] = ch; saveAccounts() }
     }
 
     private func metadata(for post: Post, now: Bool) -> [String: Any] {
@@ -231,11 +273,11 @@ final class YouTubeService: NSObject {
         guard let id = post.yt?.videoID else { return }
         var body = metadata(for: post, now: now)
         body["id"] = id
-        _ = try await api("PUT", "videos?part=snippet,status", body: body)
+        _ = try await api("PUT", "videos?part=snippet,status", body: body, account: post.yt?.account)
     }
 
-    func delete(videoID: String) async throws {
-        _ = try await api("DELETE", "videos?id=\(videoID)")
+    func delete(videoID: String, account: String? = nil) async throws {
+        _ = try await api("DELETE", "videos?id=\(videoID)", account: account)
     }
 
     // MARK: Métricas de los últimos videos y fotos diarias
@@ -245,7 +287,7 @@ final class YouTubeService: NSObject {
 
     private(set) var recent: RecentStats?
     var snapshots: [Snapshot] {
-        (UserDefaults.standard.data(forKey: "yt.snapshots").flatMap { try? JSONDecoder().decode([Snapshot].self, from: $0) }) ?? []
+        (UserDefaults.standard.data(forKey: "yt.snapshots.\(channel?.id ?? "")").flatMap { try? JSONDecoder().decode([Snapshot].self, from: $0) }) ?? []
     }
 
     /// Suma vistas, me gusta y comentarios de los últimos 10 videos y guarda una foto del día.
@@ -272,7 +314,7 @@ final class YouTubeService: NSObject {
         let day = Date.now.formatted(.iso8601.year().month().day())
         var list = snapshots.filter { $0.day != day }
         list.append(Snapshot(day: day, followers: channel?.subscribers ?? 0, views: channel?.views ?? 0, likes: r.likes))
-        UserDefaults.standard.set(try? JSONEncoder().encode(Array(list.suffix(120))), forKey: "yt.snapshots")
+        UserDefaults.standard.set(try? JSONEncoder().encode(Array(list.suffix(120))), forKey: "yt.snapshots.\(ch.id)")
     }
 
     // MARK: Comentarios
@@ -323,11 +365,11 @@ final class YouTubeService: NSObject {
 
     struct VideoState { let isPublic: Bool; let failed: String?; let views: Int; let likes: Int }
 
-    func states(for ids: [String]) async throws -> [String: VideoState] {
+    func states(for ids: [String], account: String? = nil) async throws -> [String: VideoState] {
         var out: [String: VideoState] = [:]
         for start in stride(from: 0, to: ids.count, by: 50) {
             let chunk = ids[start..<min(start + 50, ids.count)].joined(separator: ",")
-            let json = try await api("GET", "videos?part=status,statistics&id=\(chunk)")
+            let json = try await api("GET", "videos?part=status,statistics&id=\(chunk)", account: account)
             for item in json["items"] as? [[String: Any]] ?? [] {
                 guard let id = item["id"] as? String else { continue }
                 let st = item["status"] as? [String: Any] ?? [:], stats = item["statistics"] as? [String: Any] ?? [:]
