@@ -25,6 +25,7 @@ enum Publisher {
                 if now { $0.date = .now }
             }
             store.deleteVideoFile(of: id)
+            Notifier.send(now ? "Publicado en YouTube" : "Programado en YouTube", post.title)
             store.show(now ? "Publicado en YouTube" : "Subido. YouTube lo publica \(post.date.dayLabel.lowercased()) a las \(post.date.hm)")
         } catch {
             store.update(id) {
@@ -32,6 +33,7 @@ enum Publisher {
                 $0.status = .error
                 $0.errorMessage = error.localizedDescription
             }
+            Notifier.send("No se pudo subir a YouTube", "\(post.title): \(error.localizedDescription)")
             store.show(error.localizedDescription)
         }
     }
@@ -67,6 +69,7 @@ enum Publisher {
                     p.errorMessage = "YouTube rechazó el video (\(reason))."
                     p.yt?.state = .failed
                 } else if s.isPublic {
+                    if p.yt?.state != .published { Notifier.send("¡Ya se publicó en YouTube!", p.title) }
                     p.yt?.state = .published
                     p.status = .published
                     p.errorMessage = nil

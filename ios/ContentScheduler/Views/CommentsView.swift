@@ -1,27 +1,35 @@
 import SwiftUI
 
-/// Comentarios de YouTube: responder uno por uno, con respuestas rápidas, o en automático a los pendientes.
+/// Comentarios de YouTube: responder, respuestas rápidas, reglas por palabra, spam y respuesta automática.
 struct CommentsView: View {
     @Environment(AppStore.self) private var store
     @Environment(YouTubeService.self) private var youtube
 
-    @AppStorage("cs.replyTemplates") private var templatesRaw =
-        "¡Gracias por comentar, {nombre}! 🙌\nMuchas gracias por el apoyo, {nombre} 🔥\n¡Qué bueno que te gustó, {nombre}! Sígueme para más 🎶"
+    @AppStorage("cs.replyTemplates") private var templatesRaw = AutoReply.defaultTemplates
+    @AppStorage("cs.replyRules") private var rulesRaw = AutoReply.defaultRules
+    @AppStorage("cs.blockedWords") private var blockedRaw = AutoReply.defaultBlocked
+    @AppStorage("cs.skipBlocked") private var skipBlocked = true
     @AppStorage("cs.autoReply") private var autoReply = false
+
+    enum Show: String, CaseIterable { case pendientes = "Pendientes", todos = "Todos", spam = "Spam" }
 
     @State private var comments: [YouTubeService.Comment] = []
     @State private var drafts: [String: String] = [:]
-    @State private var onlyPending = true
+    @State private var show: Show = .pendientes
+    @State private var search = ""
     @State private var loading = false
     @State private var sending: Set<String> = []
-    @State private var editingTemplates = false
+    @State private var editing = false
     @State private var confirmAll = false
 
-    private var templates: [String] {
-        templatesRaw.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    private var templates: [String] { AutoReply.templates }
+    private var pending: [YouTubeService.Comment] { comments.filter { !$0.replied && !AutoReply.answered.contains($0.id) && !AutoReply.isSpam($0) } }
+    private var spam: [YouTubeService.Comment] { comments.filter { !$0.replied && AutoReply.isSpam($0) } }
+    private var shown: [YouTubeService.Comment] {
+        let base: [YouTubeService.Comment] = switch show { case .pendientes: pending; case .todos: comments; case .spam: spam }
+        let q = search.trimmingCharacters(in: .whitespaces).lowercased()
+        return q.isEmpty ? base : base.filter { $0.text.lowercased().contains(q) || $0.author.lowercased().contains(q) }
     }
-    private var pending: [YouTubeService.Comment] { comments.filter { !$0.replied } }
-    private var shown: [YouTubeService.Comment] { onlyPending ? pending : comments }
 
     var body: some View {
         Screen {
@@ -30,20 +38,25 @@ struct CommentsView: View {
             if !youtube.isConnected {
                 DemoBanner(text: "Conecta YouTube en Ajustes para ver y responder tus comentarios.", icon: "info.circle")
             } else {
-                Card {
+                HStack(spacing: 10) {
+                    stat("Pendientes", pending.count)
+                    stat("Spam", spam.count)
+                    stat("Auto hoy", AutoReply.todayCount)
+                }
+                Box {
                     Toggle(isOn: $autoReply) {
-                        VStack(alignment: .leading) {
+                        VStack(alignment: .leading, spacing: 2) {
                             Text("Respuesta automática").bold()
-                            Text("Al abrir esta pantalla, responde a los pendientes con tus respuestas rápidas (máx. 15 cada vez).")
+                            Text("Responde sola a los pendientes al abrir la app y en segundo plano, con tus reglas y respuestas rápidas (máx. 15 cada vez).")
                                 .font(.caption).foregroundStyle(Theme.muted)
                         }
                     }
                     Divider().overlay(Theme.line)
-                    Button { editingTemplates = true } label: {
+                    Button { editing = true } label: {
                         HStack {
-                            VStack(alignment: .leading) {
-                                Text("Respuestas rápidas").bold()
-                                Text("\(templates.count) guardadas · {nombre} se cambia por el nombre de quien comenta")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Reglas y respuestas").bold()
+                                Text("\(templates.count) respuestas · \(AutoReply.rules.count) reglas por palabra · \(AutoReply.blocked.count) palabras de spam")
                                     .font(.caption).foregroundStyle(Theme.muted)
                             }
                             Spacer()
@@ -51,79 +64,99 @@ struct CommentsView: View {
                         }.contentShape(Rectangle())
                     }.buttonStyle(.plain)
                 }
+                HStack(spacing: 0) {
+                    ForEach(Show.allCases, id: \.self) { s in
+                        Button(s.rawValue) { show = s }
+                            .font(.footnote).frame(maxWidth: .infinity).padding(.vertical, 10)
+                            .foregroundStyle(show == s ? .white : Theme.muted).background(show == s ? Theme.accent : Theme.bg2)
+                    }
+                }.overlay(Rectangle().strokeBorder(Theme.line))
                 HStack {
-                    Picker("Mostrar", selection: $onlyPending) {
-                        Text("Sin responder · \(pending.count)").tag(true)
-                        Text("Todos · \(comments.count)").tag(false)
-                    }.pickerStyle(.segmented)
-                }
-                if !pending.isEmpty && !templates.isEmpty {
-                    Button { confirmAll = true } label: { Label("Responder a todos los pendientes", systemImage: "bubble.left.and.bubble.right") }
-                        .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.fg))
+                    Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
+                    TextField("Buscar comentario o persona", text: $search).textInputAutocapitalization(.never)
+                }.padding(10).background(Theme.bg3)
+                if show == .pendientes && !pending.isEmpty {
+                    Button { confirmAll = true } label: { Label("Responder a todos los pendientes", systemImage: "bubble.left.and.bubble.right").frame(maxWidth: .infinity) }
+                        .buttonStyle(BoxButtonStyle())
                 }
                 if loading { ProgressView().frame(maxWidth: .infinity).padding() }
                 if !loading && shown.isEmpty {
-                    Text(onlyPending ? "No tienes comentarios pendientes. 🎉" : "Todavía no hay comentarios.")
+                    Text(show == .pendientes ? "No tienes comentarios pendientes. 🎉" : "Nada por aquí.")
                         .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, 30)
                 }
                 ForEach(shown) { c in commentCard(c) }
-                Text("Cada respuesta usa cuota de la API de YouTube (unas 200 respuestas al día con la cuota gratis).")
+                Text("Cada respuesta usa cuota de la API de YouTube (unas 200 al día con la cuota gratis).")
                     .font(.caption).foregroundStyle(Theme.muted)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
         .refreshable { await load() }
         .task { await load() }
-        .sheet(isPresented: $editingTemplates) { TemplatesEditor(raw: $templatesRaw) }
-        .confirmationDialog("¿Responder a \(min(pending.count, 15)) comentarios con tus respuestas rápidas?", isPresented: $confirmAll, titleVisibility: .visible) {
-            Button("Responder") { Task { await replyAll(limit: 15) } }
+        .sheet(isPresented: $editing) {
+            RulesEditor(templates: $templatesRaw, rules: $rulesRaw, blocked: $blockedRaw, skipBlocked: $skipBlocked)
+        }
+        .confirmationDialog("¿Responder a \(min(pending.count, 15)) comentarios con tus reglas y respuestas rápidas?", isPresented: $confirmAll, titleVisibility: .visible) {
+            Button("Responder") { Task { await runAuto() } }
         }
     }
 
+    private func stat(_ title: String, _ n: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.caption).foregroundStyle(Theme.muted)
+            Text("\(n)").font(Theme.display(30)).foregroundStyle(Theme.fg)
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+    }
+
     private func commentCard(_ c: YouTubeService.Comment) -> some View {
-        Card {
+        let done = c.replied || AutoReply.answered.contains(c.id)
+        return Box {
             HStack(alignment: .firstTextBaseline) {
-                Text(c.author).font(.subheadline.bold())
+                Text(c.author).font(.subheadline.bold()).lineLimit(1)
+                if AutoReply.isSpam(c) {
+                    Text("SPAM").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(Theme.warn)
+                        .padding(.horizontal, 5).padding(.vertical, 2).background(Theme.warn.opacity(0.15))
+                }
                 Spacer()
                 Text(c.date.dayLabel).font(.caption).foregroundStyle(Theme.muted)
             }
             Text(c.text).font(.subheadline)
-            if let url = URL(string: "https://youtu.be/\(c.videoID)") {
-                Link("Ver video", destination: url).font(.caption.bold())
+            HStack(spacing: 14) {
+                if let url = URL(string: "https://youtu.be/\(c.videoID)") { Link("Ver video", destination: url).font(.caption.bold()) }
+                Button { Task { await hide(c) } } label: { Label("Ocultar", systemImage: "eye.slash") }
+                    .font(.caption.bold()).foregroundStyle(Theme.red)
             }
-            if c.replied {
+            if done {
                 Label("Respondido", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(Theme.ok)
             } else {
                 ScrollView(.horizontal) {
                     HStack(spacing: 6) {
-                        ForEach(templates, id: \.self) { t in
-                            Button(fill(t, c)) { drafts[c.id] = fill(t, c) }
-                                .font(.caption).lineLimit(1)
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .overlay(Capsule().strokeBorder(Theme.line))
+                        if let auto = AutoReply.reply(for: c) {
+                            chip("✨ " + auto) { drafts[c.id] = auto }
                         }
+                        ForEach(templates, id: \.self) { t in chip(AutoReply.fill(t, c)) { drafts[c.id] = AutoReply.fill(t, c) } }
                     }
                 }.scrollIndicators(.hidden)
                 HStack {
                     TextField("Escribe tu respuesta…", text: Binding(get: { drafts[c.id] ?? "" }, set: { drafts[c.id] = $0 }), axis: .vertical)
-                        .lineLimit(1...4).padding(10)
-                        .background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
-                    Button {
-                        Task { await send(c, text: drafts[c.id] ?? "") }
-                    } label: {
-                        if sending.contains(c.id) { ProgressView().frame(width: 40, height: 40) }
-                        else { Image(systemName: "paperplane.fill").frame(width: 40, height: 40) }
+                        .lineLimit(1...4).padding(10).background(Theme.bg3)
+                    Button { Task { await send(c, text: drafts[c.id] ?? "") } } label: {
+                        if sending.contains(c.id) { ProgressView().frame(width: 42, height: 42) }
+                        else { Image(systemName: "paperplane.fill").frame(width: 42, height: 42) }
                     }
-                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 10)).foregroundStyle(.white)
+                    .background(Theme.accent).foregroundStyle(.white)
                     .disabled((drafts[c.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || sending.contains(c.id))
                 }
             }
         }
     }
 
-    private func fill(_ template: String, _ c: YouTubeService.Comment) -> String {
-        let name = c.author.trimmingCharacters(in: CharacterSet(charactersIn: "@")).split(separator: " ").first.map(String.init) ?? ""
-        return template.replacingOccurrences(of: "{nombre}", with: name)
+    private func chip(_ text: String, _ action: @escaping () -> Void) -> some View {
+        Button(text, action: action)
+            .font(.caption).lineLimit(1).frame(maxWidth: 240)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .overlay(Capsule().strokeBorder(Theme.line))
     }
 
     private func load() async {
@@ -132,61 +165,78 @@ struct CommentsView: View {
         defer { loading = false }
         do {
             comments = try await youtube.comments()
-            if autoReply && !pending.isEmpty && !templates.isEmpty { await replyAll(limit: 15) }
+            if autoReply { await runAuto() }
         } catch {
             store.show(error.localizedDescription)
         }
     }
 
-    @discardableResult
-    private func send(_ c: YouTubeService.Comment, text: String) async -> Bool {
+    private func runAuto() async {
+        let n = await AutoReply.run(comments, yt: youtube)
+        if n > 0 {
+            for i in comments.indices where AutoReply.answered.contains(comments[i].id) { comments[i].replied = true }
+            store.show("\(n) \(n == 1 ? "comentario respondido" : "comentarios respondidos")")
+        }
+    }
+
+    private func send(_ c: YouTubeService.Comment, text: String) async {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return false }
+        guard !t.isEmpty else { return }
         sending.insert(c.id)
         defer { sending.remove(c.id) }
         do {
             try await youtube.reply(to: c.commentID, text: t)
+            AutoReply.answered.insert(c.id)
             if let i = comments.firstIndex(where: { $0.id == c.id }) { comments[i].replied = true }
             drafts[c.id] = nil
-            return true
         } catch {
             store.show(error.localizedDescription)
-            return false
         }
     }
 
-    private func replyAll(limit: Int) async {
-        var done = 0
-        for (i, c) in pending.prefix(limit).enumerated() {
-            let template = templates[i % templates.count]
-            if await send(c, text: fill(template, c)) { done += 1 } else { break }
-            try? await Task.sleep(for: .milliseconds(600))
+    private func hide(_ c: YouTubeService.Comment) async {
+        do {
+            try await youtube.hide(commentID: c.commentID)
+            comments.removeAll { $0.id == c.id }
+            store.show("Comentario ocultado")
+        } catch {
+            store.show(error.localizedDescription)
         }
-        if done > 0 { store.show("\(done) \(done == 1 ? "comentario respondido" : "comentarios respondidos")") }
     }
 }
 
-struct TemplatesEditor: View {
-    @Binding var raw: String
+struct RulesEditor: View {
+    @Binding var templates: String
+    @Binding var rules: String
+    @Binding var blocked: String
+    @Binding var skipBlocked: Bool
     @Environment(\.dismiss) private var dismiss
-    @State private var text = ""
+    @State private var t = ""
+    @State private var r = ""
+    @State private var b = ""
 
     var body: some View {
         NavigationStack {
             Screen {
-                Text("Una respuesta por línea. Escribe {nombre} donde quieras el nombre de quien comenta.")
-                    .font(.footnote).foregroundStyle(Theme.muted)
-                TextEditor(text: $text)
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 240).padding(10)
-                    .background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
+                section("Respuestas rápidas", "Una por línea. {nombre} se cambia por el nombre de quien comenta.", $t, 150)
+                section("Reglas por palabra", "Una por línea: palabras separadas por coma => respuesta.\nEjemplo: precio, cuánto => Escríbeme por DM, {nombre}", $r, 150)
+                section("Palabras de spam", "Separadas por coma. Esos comentarios no se responden solos.", $b, 90)
+                Toggle("No responder comentarios con spam o links", isOn: $skipBlocked).font(.subheadline)
             }
-            .navigationTitle("Respuestas rápidas").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Reglas y respuestas").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Guardar") { raw = text; dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Guardar") { templates = t; rules = r; blocked = b; dismiss() } }
             }
-            .onAppear { text = raw }
+            .onAppear { t = templates; r = rules; b = blocked }
+        }
+    }
+
+    private func section(_ title: String, _ hint: String, _ text: Binding<String>, _ height: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased()).font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+            Text(hint).font(.caption).foregroundStyle(Theme.muted)
+            TextEditor(text: text).scrollContentBackground(.hidden).frame(minHeight: height).padding(8).background(Theme.bg3)
         }
     }
 }

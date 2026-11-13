@@ -316,6 +316,11 @@ final class YouTubeService: NSObject {
         _ = try await api("POST", "comments?part=snippet", body: ["snippet": ["parentId": commentID, "textOriginal": text]])
     }
 
+    /// Oculta un comentario del canal (queda rechazado por moderación).
+    func hide(commentID: String) async throws {
+        _ = try await api("POST", "comments/setModerationStatus?id=\(commentID)&moderationStatus=rejected")
+    }
+
     struct VideoState { let isPublic: Bool; let failed: String?; let views: Int; let likes: Int }
 
     func states(for ids: [String]) async throws -> [String: VideoState] {

@@ -51,6 +51,16 @@ struct SettingsView: View {
                     }
                 }
 
+                SectionLabel(text: "Notificaciones")
+                Card {
+                    Toggle(isOn: Binding(get: { UserDefaults.standard.object(forKey: "cs.notify") as? Bool ?? true },
+                                         set: { v in UserDefaults.standard.set(v, forKey: "cs.notify"); if v { Task { _ = await Notifier.requestPermission() } } })) {
+                        VStack(alignment: .leading) {
+                            Text("Avisos en el teléfono").bold()
+                            Text("Cuando un video se programa, se publica o falla, y cuando llegan comentarios.").font(.caption).foregroundStyle(Theme.muted)
+                        }
+                    }
+                }
                 SectionLabel(text: "Horarios de publicación")
                 Card {
                     FlowSlots(slots: store.state.slots.sorted()) { s in

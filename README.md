@@ -10,6 +10,10 @@ La ventana de herramientas de Content Scheduler como app nativa para iPhone (Swi
 - **Clips IA**: momentos de ejemplo a partir de un link (el análisis real todavía no está conectado) y reciclar lo publicado.
 - **Ajustes**: conectar YouTube, horarios de publicación, avisos y datos de ejemplo.
 
+- **Comentarios**: responder, respuestas rápidas, reglas por palabra clave (`precio, cuánto => …`), filtro de spam y links, ocultar comentarios y **respuesta automática** (al abrir la app y en segundo plano con la actualización en segundo plano de iOS).
+- **Notificaciones**: cuando un video se programa, se publica o falla, y cuando llegan comentarios.
+- **Grupos de hashtags** guardados en el editor.
+
 Los datos y los videos se guardan en el iPhone. **YouTube publica de verdad**: el video se sube como privado con hora de publicación y YouTube lo publica solo a esa hora. Facebook, Instagram y TikTok todavía son de prueba.
 
 ### Descargar la .ipa

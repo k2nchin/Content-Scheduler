@@ -1,10 +1,13 @@
 import SwiftUI
+import BackgroundTasks
 
 @main
 struct ContentSchedulerApp: App {
     @State private var store = AppStore()
     @State private var youtube = YouTubeService()
     @Environment(\.scenePhase) private var phase
+
+    static let refreshID = "com.contentscheduler.app.refresh"
 
     var body: some Scene {
         WindowGroup {
@@ -13,10 +16,42 @@ struct ContentSchedulerApp: App {
                 .environment(youtube)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
-                .task { await Publisher.refresh(store: store, yt: youtube) }
+                .task {
+                    _ = await Notifier.requestPermission()
+                    await Publisher.refresh(store: store, yt: youtube)
+                }
                 .onChange(of: phase) { _, new in
                     if new == .active { Task { await Publisher.refresh(store: store, yt: youtube) } }
+                    if new == .background { Self.scheduleRefresh() }
                 }
+        }
+        .backgroundTask(.appRefresh(Self.refreshID)) {
+            Self.scheduleRefresh()
+            await Self.backgroundWork(store: store, yt: youtube)
+        }
+    }
+
+    static func scheduleRefresh() {
+        let req = BGAppRefreshTaskRequest(identifier: refreshID)
+        req.earliestBeginDate = Date.now.addingTimeInterval(20 * 60)
+        try? BGTaskScheduler.shared.submit(req)
+    }
+
+    /// Con la app cerrada: revisa estados de YouTube, comentarios nuevos y responde solo si está activado.
+    @MainActor
+    static func backgroundWork(store: AppStore, yt: YouTubeService) async {
+        guard yt.isConnected else { return }
+        await Publisher.refresh(store: store, yt: yt)
+        guard let comments = try? await yt.comments() else { return }
+        let pending = comments.filter { !$0.replied && !AutoReply.answered.contains($0.id) }
+        let seen = Set(UserDefaults.standard.stringArray(forKey: "cs.seenComments") ?? [])
+        let fresh = pending.filter { !seen.contains($0.id) }
+        UserDefaults.standard.set(Array(seen.union(comments.map(\.id)).suffix(3000)), forKey: "cs.seenComments")
+        if AutoReply.enabled {
+            let n = await AutoReply.run(pending, yt: yt)
+            if n > 0 { Notifier.send("Respuestas automáticas", "Respondí \(n) \(n == 1 ? "comentario" : "comentarios") en YouTube.") }
+        } else if !fresh.isEmpty {
+            Notifier.send("Comentarios nuevos", "Tienes \(fresh.count) \(fresh.count == 1 ? "comentario nuevo" : "comentarios nuevos") en YouTube.")
         }
     }
 }

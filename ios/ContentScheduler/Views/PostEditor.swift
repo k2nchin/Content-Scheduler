@@ -15,6 +15,8 @@ struct PostEditor: View {
     @State private var pick: PhotosPickerItem?
     @State private var confirmDelete = false
     @State private var busy = false
+    @AppStorage("cs.hashtagGroups") private var groupsRaw = "#musica #envivo #viral\n#meme #humor #parati\n#reels #shorts #fyp"
+    private var groups: [String] { groupsRaw.split(separator: "\n").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
 
     private var post: Post? { store.post(postID) }
 
@@ -38,6 +40,27 @@ struct PostEditor: View {
                     Text("Hashtags").font(.caption).foregroundStyle(Theme.muted).padding(.top, 6)
                     TextField("#musica #envivo", text: $tags).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 6) {
+                            ForEach(groups, id: \.self) { g in
+                                Button(g) {
+                                    let have = Set(tags.split(separator: " ").map(String.init))
+                                    let add = g.split(separator: " ").map(String.init).filter { !have.contains($0) }
+                                    tags = (tags.trimmingCharacters(in: .whitespaces) + " " + add.joined(separator: " ")).trimmingCharacters(in: .whitespaces)
+                                }
+                                .font(.caption).lineLimit(1).padding(.horizontal, 10).padding(.vertical, 6)
+                                .overlay(Capsule().strokeBorder(Theme.line))
+                            }
+                            Button {
+                                let t = tags.trimmingCharacters(in: .whitespaces)
+                                guard !t.isEmpty, !groups.contains(t) else { return }
+                                groupsRaw = (groups + [t]).joined(separator: "\n")
+                                store.show("Grupo de hashtags guardado")
+                            } label: { Label("Guardar grupo", systemImage: "plus") }
+                                .font(.caption.bold()).padding(.horizontal, 10).padding(.vertical, 6)
+                                .foregroundStyle(Theme.accent).overlay(Capsule().strokeBorder(Theme.accent.opacity(0.6)))
+                        }
+                    }.scrollIndicators(.hidden)
 
                     Text("Redes").font(.caption).foregroundStyle(Theme.muted).padding(.top, 6)
                     HStack(spacing: 8) {
