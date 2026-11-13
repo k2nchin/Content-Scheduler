@@ -1,0 +1,44 @@
+name: iOS IPA
+
+on:
+  push:
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar XcodeGen
+        run: brew install xcodegen
+      - name: Generar proyecto de Xcode
+        working-directory: ios
+        run: xcodegen generate
+      - name: Compilar (sin firmar)
+        working-directory: ios
+        run: |
+          xcodebuild -project ContentScheduler.xcodeproj -target ContentScheduler \
+            -sdk iphoneos -configuration Release SYMROOT="$PWD/build" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tee build.log | grep -E "error:|warning: .*(deprecated|will be)|BUILD" || true
+          test -d build/Release-iphoneos/ContentScheduler.app
+      - name: Empaquetar .ipa
+        working-directory: ios
+        run: |
+          mkdir -p Payload && cp -R build/Release-iphoneos/ContentScheduler.app Payload/
+          zip -qr ContentScheduler.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ContentScheduler-ipa
+          path: ios/ContentScheduler.ipa
+      - name: Publicar en Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ios-latest -y --cleanup-tag || true
+          gh release create ios-latest ios/ContentScheduler.ipa --target "$GITHUB_SHA" --prerelease \
+            --title "Content Scheduler iOS (sin firmar)" \
+            --notes "Compilado de ${GITHUB_SHA::7}. Sin firmar: instálalo con Sideloadly o AltStore usando tu Apple ID."

@@ -1,0 +1,211 @@
+import SwiftUI
+import PhotosUI
+
+struct PostEditor: View {
+    let postID: UUID
+    @Environment(AppStore.self) private var store
+    @Environment(YouTubeService.self) private var youtube
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title = ""
+    @State private var tags = ""
+    @State private var networks: Set<Network> = []
+    @State private var date = Date.now
+    @State private var loaded = false
+    @State private var pick: PhotosPickerItem?
+    @State private var confirmDelete = false
+    @State private var busy = false
+
+    private var post: Post? { store.post(postID) }
+
+    var body: some View {
+        NavigationStack {
+            Screen {
+                if let post {
+                    if let err = post.errorMessage {
+                        DemoBanner(text: err, icon: "exclamationmark.triangle", color: Theme.red)
+                    }
+                    HStack(alignment: .top, spacing: 12) {
+                        Thumb(post: post, width: 74)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Título").font(.caption).foregroundStyle(Theme.muted)
+                            TextField("Título", text: $title, axis: .vertical)
+                                .lineLimit(3...4).padding(12)
+                                .background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
+                                .onChange(of: title) { _, v in if v.count > 100 { title = String(v.prefix(100)) } }
+                        }
+                    }
+                    Text("Hashtags").font(.caption).foregroundStyle(Theme.muted).padding(.top, 6)
+                    TextField("#musica #envivo", text: $tags).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
+
+                    Text("Redes").font(.caption).foregroundStyle(Theme.muted).padding(.top, 6)
+                    HStack(spacing: 8) {
+                        ForEach(Network.allCases) { n in
+                            let on = networks.contains(n)
+                            Button {
+                                if on { networks.remove(n) } else { networks.insert(n) }
+                            } label: {
+                                VStack(spacing: 6) {
+                                    NetBadge(network: n)
+                                    Text(n.name).font(.system(size: 11)).foregroundStyle(on ? Theme.fg : Theme.muted)
+                                }
+                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                .background(on ? Theme.bg3 : .clear, in: RoundedRectangle(cornerRadius: 10))
+                                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(on ? Theme.fg : Theme.line))
+                            }.buttonStyle(.plain)
+                        }
+                    }
+
+                    if networks.contains(.youtube) { youtubeBox(post) }
+
+                    DatePicker("Día y hora", selection: $date, displayedComponents: [.date, .hourAndMinute])
+                        .environment(\.locale, Locale(identifier: "es"))
+                        .padding(.top, 6)
+
+                    let uploading = post.yt?.state == .uploading
+                    HStack(spacing: 10) {
+                        Button { approval(post) } label: { Label("Aprobación", systemImage: "link") }
+                            .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.fg))
+                        Button { publishNow(post) } label: { Label("Publicar ya", systemImage: "paperplane") }
+                            .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.fg))
+                    }.padding(.top, 12).disabled(uploading || busy)
+                    Button { save(post) } label: { Text(saveLabel(post)) }
+                        .buttonStyle(PrimaryButtonStyle()).disabled(uploading || busy)
+                    Button(role: .destructive) { confirmDelete = true } label: { Label("Eliminar", systemImage: "trash") }
+                        .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.red)).disabled(uploading || busy)
+                }
+            }
+            .navigationTitle(post?.yt == nil && post?.status == .scheduled && post?.videoFile != nil ? "Nuevo post" : "Editar post")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { dismiss() } }
+                if let post { ToolbarItem(placement: .topBarTrailing) { StatusPill(status: post.status) } }
+            }
+            .onAppear(perform: load)
+            .onChange(of: pick) { _, item in attach(item) }
+            .confirmationDialog("¿Eliminar este post?", isPresented: $confirmDelete, titleVisibility: .visible) {
+                if let post, let vid = post.yt?.videoID, post.yt?.state != .published {
+                    Button("Eliminar aquí y en YouTube", role: .destructive) {
+                        Task {
+                            do { try await youtube.delete(videoID: vid); store.remove(postID); dismiss() }
+                            catch { store.show(error.localizedDescription) }
+                        }
+                    }
+                }
+                Button("Eliminar de la app", role: .destructive) { store.remove(postID); dismiss(); store.show("Eliminado") }
+            }
+        }
+        .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder private func youtubeBox(_ post: Post) -> some View {
+        Card {
+            HStack(alignment: .top, spacing: 12) {
+                NetBadge(network: .youtube, size: 30)
+                VStack(alignment: .leading, spacing: 3) {
+                    switch post.yt?.state {
+                    case .uploading:
+                        Text("Subiendo a YouTube… \(Int((post.yt?.progress ?? 0) * 100))%").bold()
+                        ProgressView(value: post.yt?.progress ?? 0)
+                        Text("Deja la app abierta hasta que termine.").font(.caption).foregroundStyle(Theme.muted)
+                    case .scheduled, .published, .privateLocked:
+                        Text(post.yt?.state == .published ? "Publicado en YouTube" : post.yt?.state == .privateLocked ? "Subido, pero YouTube lo dejó privado" : "Subido · YouTube lo publica solo").bold()
+                        Text(post.yt?.state == .privateLocked ? "La app de Google todavía no está verificada por YouTube."
+                             : post.yt?.state == .scheduled ? "\(post.date.dayLabel) a las \(post.date.hm), aunque cierres la app." : "")
+                            .font(.caption).foregroundStyle(Theme.muted)
+                        if let vid = post.yt?.videoID, let url = URL(string: "https://youtu.be/\(vid)") {
+                            Link("Ver en YouTube", destination: url).font(.caption.bold())
+                        }
+                    default:
+                        if let err = post.yt?.error, post.yt?.state == .failed {
+                            Text("No se pudo subir").bold().foregroundStyle(Theme.red)
+                            Text(err).font(.caption).foregroundStyle(Theme.muted)
+                        }
+                        if !youtube.isConnected {
+                            Text("YouTube sin conectar").bold()
+                            Text("Conéctalo en Ajustes para subir este video.").font(.caption).foregroundStyle(Theme.muted)
+                        } else if Publisher.fileURL(post) == nil {
+                            Text("Falta el archivo del video").bold()
+                            PhotosPicker(selection: $pick, matching: .videos) { Label("Elegir video", systemImage: "video") }
+                                .font(.caption.bold())
+                        } else if post.yt?.state != .failed {
+                            Text("Listo para subir").bold()
+                            Text("Se sube al tocar Guardar y YouTube lo publica a la hora elegida.").font(.caption).foregroundStyle(Theme.muted)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func saveLabel(_ post: Post) -> String {
+        networks.contains(.youtube) && post.yt?.videoID == nil && Publisher.fileURL(post) != nil && youtube.isConnected
+            ? "Guardar y subir a YouTube" : "Guardar"
+    }
+
+    private func load() {
+        guard !loaded, let post else { return }
+        title = post.title; tags = post.tags; networks = post.networks; date = post.date; loaded = true
+    }
+
+    private func write() -> (changed: Bool, post: Post)? {
+        guard let before = post else { return nil }
+        store.update(postID) {
+            $0.title = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? $0.title : title
+            $0.tags = tags
+            $0.networks = networks
+            $0.date = date
+        }
+        guard let after = post else { return nil }
+        return (before.title != after.title || before.tags != after.tags || before.date != after.date, after)
+    }
+
+    private func save(_ current: Post) {
+        guard !networks.isEmpty else { return store.show("Elige al menos una red") }
+        let uploaded = current.yt?.videoID != nil
+        if networks.contains(.youtube) && !uploaded && date < Date.now.addingTimeInterval(-60) {
+            return store.show("Esa hora ya pasó. Elige otra o usa Publicar ya.")
+        }
+        guard let result = write() else { return }
+        let changed = result.changed, p = result.post
+        if p.status == .error { store.update(postID) { $0.status = .scheduled; $0.errorMessage = nil } }
+        dismiss()
+        guard networks.contains(.youtube), youtube.isConnected else { return store.show("Guardado") }
+        if !uploaded, Publisher.fileURL(p) != nil {
+            Task { await Publisher.upload(postID, now: false, store: store, yt: youtube) }
+        } else if uploaded, changed, p.yt?.state != .published {
+            Task { await Publisher.update(postID, now: false, store: store, yt: youtube) }
+        } else {
+            store.show("Guardado")
+        }
+    }
+
+    private func publishNow(_ current: Post) {
+        guard write() != nil else { return }
+        dismiss()
+        if networks.contains(.youtube), youtube.isConnected {
+            if current.yt?.videoID != nil { Task { await Publisher.update(postID, now: true, store: store, yt: youtube) }; return }
+            if Publisher.fileURL(current) != nil { Task { await Publisher.upload(postID, now: true, store: store, yt: youtube) }; return }
+        }
+        store.update(postID) { $0.status = .published; $0.date = .now; $0.errorMessage = nil }
+        store.show("Marcado como publicado (otras redes: modo prueba)")
+    }
+
+    private func approval(_ current: Post) {
+        _ = write()
+        store.update(postID) { $0.status = .approval }
+        UIPasteboard.general.string = "Revisa este post: \(title)\n\(tags)\n\(date.dayLabel) a las \(date.hm)"
+        store.show("Resumen copiado para enviarlo a tu cliente")
+    }
+
+    private func attach(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        busy = true
+        Task {
+            defer { busy = false; pick = nil }
+            guard let movie = try? await item.loadTransferable(type: PickedMovie.self) else { return store.show("No se pudo leer el video.") }
+            store.update(postID) { $0.videoFile = movie.url.lastPathComponent; $0.yt = nil }
+        }
+    }
+}

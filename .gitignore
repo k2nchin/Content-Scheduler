@@ -1,0 +1,7 @@
+ios/*.xcodeproj/
+ios/build/
+ios/Payload/
+ios/*.ipa
+ios/build.log
+.DS_Store
+xcuserdata/
