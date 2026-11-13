@@ -8,6 +8,7 @@ struct CalendarView: View {
     @State private var editing: UUID?
     @State private var pick: PhotosPickerItem?
     @State private var targetTime: Date?
+    @State private var newSlot = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: .now) ?? .now
 
     private var days: [Date] {
         let start = Calendar.current.startOfDay(for: .now)
@@ -17,7 +18,23 @@ struct CalendarView: View {
     var body: some View {
         NavigationStack {
             Screen {
-                ScreenTitle(solid: "Tus", outline: "horas", subtitle: "Cada video nuevo toma el siguiente horario libre.")
+                AppHeader()
+                PageTitle(kicker: "Tu semana", title: "Horarios")
+                Text("Cada video nuevo toma el siguiente horario libre.").font(.footnote).foregroundStyle(Theme.muted)
+                Box {
+                    Text("HORARIOS DE PUBLICACIÓN").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                    FlowSlots(slots: store.state.slots.sorted()) { s in
+                        if store.state.slots.count > 1 { store.state.slots.removeAll { $0 == s } } else { store.show("Deja al menos un horario") }
+                    }
+                    HStack {
+                        DatePicker("Nuevo horario", selection: $newSlot, displayedComponents: .hourAndMinute).labelsHidden()
+                        Spacer()
+                        Button("Agregar") {
+                            let s = newSlot.hm
+                            if !store.state.slots.contains(s) { store.state.slots.append(s); store.show("Horario agregado") }
+                        }.buttonStyle(BoxButtonStyle(filled: true))
+                    }
+                }
                 HStack(spacing: 6) {
                     ForEach(Array(days.enumerated()), id: \.offset) { i, d in
                         let has = store.state.posts.contains { Calendar.current.isDate($0.date, inSameDayAs: d) }

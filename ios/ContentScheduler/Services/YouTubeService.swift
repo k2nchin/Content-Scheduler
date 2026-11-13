@@ -238,6 +238,43 @@ final class YouTubeService: NSObject {
         _ = try await api("DELETE", "videos?id=\(videoID)")
     }
 
+    // MARK: Métricas de los últimos videos y fotos diarias
+
+    struct RecentStats { var views = 0; var likes = 0; var comments = 0; var videos = 0 }
+    struct Snapshot: Codable { let day: String; let followers: Int; let views: Int; let likes: Int }
+
+    private(set) var recent: RecentStats?
+    var snapshots: [Snapshot] {
+        (UserDefaults.standard.data(forKey: "yt.snapshots").flatMap { try? JSONDecoder().decode([Snapshot].self, from: $0) }) ?? []
+    }
+
+    /// Suma vistas, me gusta y comentarios de los últimos 10 videos y guarda una foto del día.
+    func refreshRecent() async throws {
+        guard let ch = channel else { return }
+        let c = try await api("GET", "channels?part=contentDetails&id=\(ch.id)")
+        let uploads = (((c["items"] as? [[String: Any]])?.first?["contentDetails"] as? [String: Any])?["relatedPlaylists"] as? [String: Any])?["uploads"] as? String
+        var r = RecentStats()
+        if let uploads {
+            let pl = try await api("GET", "playlistItems?part=contentDetails&playlistId=\(uploads)&maxResults=10")
+            let ids = (pl["items"] as? [[String: Any]] ?? []).compactMap { ($0["contentDetails"] as? [String: Any])?["videoId"] as? String }
+            if !ids.isEmpty {
+                let v = try await api("GET", "videos?part=statistics&id=\(ids.joined(separator: ","))")
+                for item in v["items"] as? [[String: Any]] ?? [] {
+                    let st = item["statistics"] as? [String: Any] ?? [:]
+                    r.views += Int(st["viewCount"] as? String ?? "") ?? 0
+                    r.likes += Int(st["likeCount"] as? String ?? "") ?? 0
+                    r.comments += Int(st["commentCount"] as? String ?? "") ?? 0
+                    r.videos += 1
+                }
+            }
+        }
+        recent = r
+        let day = Date.now.formatted(.iso8601.year().month().day())
+        var list = snapshots.filter { $0.day != day }
+        list.append(Snapshot(day: day, followers: channel?.subscribers ?? 0, views: channel?.views ?? 0, likes: r.likes))
+        UserDefaults.standard.set(try? JSONEncoder().encode(Array(list.suffix(120))), forKey: "yt.snapshots")
+    }
+
     // MARK: Comentarios
 
     struct Comment: Identifiable, Hashable {

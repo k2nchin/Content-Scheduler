@@ -12,7 +12,8 @@ struct SettingsView: View {
         @Bindable var store = store
         NavigationStack {
             Screen {
-                ScreenTitle(solid: "Ajus", outline: "tes")
+                AppHeader()
+                PageTitle(kicker: "Tu cuenta", title: "Ajustes")
                 SectionLabel(text: "Cuentas conectadas")
                 Card {
                     Button {

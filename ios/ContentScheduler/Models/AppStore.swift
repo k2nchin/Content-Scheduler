@@ -136,4 +136,31 @@ final class AppStore {
         }
         state.posts = posts
     }
+
+    // MARK: Estados como en tu app
+
+    func isScheduled(_ p: Post) -> Bool { p.yt?.videoID != nil && p.status == .scheduled }
+    var porProgramar: [Post] { upcoming.filter { $0.status != .error && $0.status != .approval && !isScheduled($0) } }
+    var programados: [Post] { upcoming.filter { isScheduled($0) } }
+    var porRevisar: [Post] { upcoming.filter { $0.status == .error || $0.status == .approval } }
+
+    /// Vuelve a repartir lo que falta por programar en los siguientes horarios libres, en orden.
+    func reorganize() {
+        let ids = porProgramar.sorted { $0.date < $1.date }.map(\.id)
+        for id in ids { update(id) { $0.date = .distantFuture } }
+        var after = Date.now
+        for id in ids {
+            let t = nextFreeSlot(after: after)
+            update(id) { $0.date = t }
+            after = t.addingTimeInterval(60)
+        }
+        show("Cola reorganizada")
+    }
+
+    /// Borra de la app todo lo que no se ha publicado (lo ya subido a YouTube se queda en YouTube).
+    func clearQueue() {
+        for p in upcoming { deleteVideoFile(of: p.id) }
+        state.posts.removeAll { $0.status != .published }
+        show("Cola borrada")
+    }
 }

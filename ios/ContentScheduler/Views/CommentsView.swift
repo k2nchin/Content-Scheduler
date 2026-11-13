@@ -25,7 +25,8 @@ struct CommentsView: View {
 
     var body: some View {
         Screen {
-            ScreenTitle(solid: "Comen", outline: "tarios", subtitle: "Responde a tu público de YouTube desde aquí.")
+            AppHeader()
+            PageTitle(kicker: "Tu público", title: "Comentarios")
             if !youtube.isConnected {
                 DemoBanner(text: "Conecta YouTube en Ajustes para ver y responder tus comentarios.", icon: "info.circle")
             } else {
@@ -70,7 +71,7 @@ struct CommentsView: View {
                     .font(.caption).foregroundStyle(Theme.muted)
             }
         }
-        .navigationTitle("Comentarios").navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .navigationBar)
         .refreshable { await load() }
         .task { await load() }
         .sheet(isPresented: $editingTemplates) { TemplatesEditor(raw: $templatesRaw) }

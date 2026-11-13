@@ -172,3 +172,117 @@ struct Screen<Content: View>: View {
         .background(Theme.bg.ignoresSafeArea())
     }
 }
+
+// MARK: Estructura de tu app (encabezado, título de página, barra inferior)
+
+struct AppHeader: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "play.fill").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 40, height: 40)
+                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 6))
+                    .shadow(color: Theme.accent.opacity(0.5), radius: 12)
+                Text("CONTENT SCHEDULER").font(Theme.display(22)).tracking(1).foregroundStyle(Theme.fg)
+                Spacer()
+            }
+            HStack(spacing: 8) {
+                Image(systemName: "rectangle.split.2x1").font(.caption).foregroundStyle(Theme.muted)
+                Text("TU ESPACIO  /  ESTUDIO DE PUBLICACIÓN").font(Theme.mono).tracking(2).foregroundStyle(Theme.muted)
+            }
+            Divider().overlay(Theme.line)
+        }
+    }
+}
+
+struct PageTitle: View {
+    let kicker: String
+    let title: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Circle().fill(Theme.accent).frame(width: 7, height: 7)
+                Text(kicker.uppercased()).font(.system(size: 13, weight: .medium, design: .monospaced)).tracking(3).foregroundStyle(Theme.accent)
+            }
+            (Text(title.uppercased()).foregroundStyle(Theme.fg) + Text(".").foregroundStyle(Theme.accent))
+                .font(Theme.display(56))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 10)
+    }
+}
+
+enum AppTab: String, CaseIterable, Identifiable {
+    case contenido, horarios, metrica, comentarios, ajustes
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .contenido: "CONTENIDO"
+        case .horarios: "HORARIOS"
+        case .metrica: "MÉTRICA"
+        case .comentarios: "COMENT."
+        case .ajustes: "AJUSTES"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .contenido: "square.grid.2x2"
+        case .horarios: "clock.arrow.circlepath"
+        case .metrica: "chart.bar"
+        case .comentarios: "bubble.left"
+        case .ajustes: "slider.horizontal.3"
+        }
+    }
+}
+
+struct BottomBar: View {
+    @Binding var tab: AppTab
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(AppTab.allCases) { t in
+                Button { tab = t } label: {
+                    VStack(spacing: 5) {
+                        Image(systemName: t.icon).font(.system(size: 19))
+                            .frame(width: 48, height: 30)
+                            .background(tab == t ? Theme.accent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 9))
+                            .foregroundStyle(tab == t ? Theme.accent : Theme.muted)
+                        Text(t.label).font(.system(size: 9.5, weight: tab == t ? .bold : .medium, design: .monospaced))
+                            .foregroundStyle(tab == t ? Theme.fg : Theme.muted)
+                    }.frame(maxWidth: .infinity)
+                }.buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 10).padding(.bottom, 4)
+        .background(Theme.bg2.opacity(0.97))
+        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+    }
+}
+
+/// Botón rectangular como los de tu app (Publicar ahora, Reporte…).
+struct BoxButtonStyle: ButtonStyle {
+    var filled = false
+    var color = Theme.accent
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12.5, weight: .bold)).textCase(.uppercase).tracking(1.2)
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .foregroundStyle(filled ? .white : (color == Theme.accent ? Theme.fg : color))
+            .background(filled ? color : .clear)
+            .overlay(Rectangle().strokeBorder(filled ? .clear : (color == Theme.accent ? Theme.fg.opacity(0.85) : color), lineWidth: 1.2))
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+/// Recuadro con borde recto como las tarjetas de tu app.
+struct Box<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) { content }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.bg2)
+            .overlay(Rectangle().strokeBorder(Theme.line))
+    }
+}
+
+extension UUID: @retroactive Identifiable { public var id: UUID { self } }

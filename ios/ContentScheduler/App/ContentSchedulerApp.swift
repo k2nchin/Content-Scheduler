@@ -23,15 +23,20 @@ struct ContentSchedulerApp: App {
 
 struct RootView: View {
     @Environment(AppStore.self) private var store
+    @State private var tab: AppTab = .contenido
 
     var body: some View {
-        TabView {
-            QueueView().tabItem { Label("Cola", systemImage: "list.bullet.rectangle") }
-            CalendarView().tabItem { Label("Calendario", systemImage: "calendar") }
-            StatsView().tabItem { Label("Stats", systemImage: "chart.bar.fill") }
-            ClipsView().tabItem { Label("Clips IA", systemImage: "sparkles") }
-            SettingsView().tabItem { Label("Ajustes", systemImage: "gearshape") }
+        ZStack {
+            Theme.bg.ignoresSafeArea()
+            switch tab {
+            case .contenido: ContenidoView()
+            case .horarios: CalendarView()
+            case .metrica: MetricaView()
+            case .comentarios: NavigationStack { CommentsView() }
+            case .ajustes: SettingsView()
+            }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) { BottomBar(tab: $tab) }
         .overlay(alignment: .bottom) {
             if let t = store.toast {
                 Text(t)
@@ -41,7 +46,7 @@ struct RootView: View {
                     .padding(.horizontal, 16).padding(.vertical, 11)
                     .background(Theme.fg, in: RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 64)
+                    .padding(.bottom, 90)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .allowsHitTesting(false)
             }
