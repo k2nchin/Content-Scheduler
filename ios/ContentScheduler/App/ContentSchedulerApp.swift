@@ -55,6 +55,14 @@ struct ContentSchedulerApp: App {
     @MainActor
     static func backgroundWork(store: AppStore, yt: YouTubeService, meta: MetaService) async {
         await Publisher.publishDue(store: store, meta: meta)
+        if AutoReply.enabled {
+            for n in [Network.facebook, .instagram] where (n == .facebook ? meta.facebookConnected : meta.instagramConnected) {
+                if let list = try? await meta.comments(n) {
+                    let done = await AutoReply.run(list) { c, text in try await meta.reply(n, to: c.commentID, text: text) }
+                    if done > 0 { Notifier.send("Respuestas automáticas", "Respondí \(done) en \(n.name).") }
+                }
+            }
+        }
         guard yt.isConnected else { return }
         await Publisher.refresh(store: store, yt: yt)
         guard let comments = try? await yt.comments() else { return }

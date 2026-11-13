@@ -63,11 +63,16 @@ enum AutoReply {
     /// Responde a los pendientes. Devuelve cuántos respondió.
     @discardableResult
     static func run(_ comments: [YouTubeService.Comment], yt: YouTubeService, limit: Int = 15) async -> Int {
+        await run(comments, limit: limit) { c, text in try await yt.reply(to: c.commentID, text: text) }
+    }
+
+    @discardableResult
+    static func run(_ comments: [YouTubeService.Comment], limit: Int = 15, send: (YouTubeService.Comment, String) async throws -> Void) async -> Int {
         var done = 0
         for c in comments where done < limit {
             guard let text = reply(for: c) else { continue }
             do {
-                try await yt.reply(to: c.commentID, text: text)
+                try await send(c, text)
                 answered.insert(c.id)
                 done += 1
                 try? await Task.sleep(for: .milliseconds(600))

@@ -4,4 +4,4 @@ GOOGLE_IOS_CLIENT_ID = 84783551840-mki8tk5nse0mh4idh09f88gi8csf59f1.apps.googleu
 GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.84783551840-mki8tk5nse0mh4idh09f88gi8csf59f1
 
 // App ID de tu app de Meta (developers.facebook.com > tu app > Configuración > Básica). Es público, NO es el secreto.
-META_APP_ID = 
+META_APP_ID = 1611404507348655

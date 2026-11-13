@@ -4,6 +4,16 @@ import SwiftUI
 struct CommentsView: View {
     @Environment(AppStore.self) private var store
     @Environment(YouTubeService.self) private var youtube
+    @Environment(MetaService.self) private var meta
+    @State private var network: Network = .youtube
+    private var netConnected: Bool {
+        switch network {
+        case .youtube: youtube.isConnected
+        case .facebook: meta.facebookConnected
+        case .instagram: meta.instagramConnected
+        case .tiktok: false
+        }
+    }
 
     @AppStorage("cs.replyTemplates") private var templatesRaw = AutoReply.defaultTemplates
     @AppStorage("cs.replyRules") private var rulesRaw = AutoReply.defaultRules
@@ -35,10 +45,26 @@ struct CommentsView: View {
         Screen {
             AppHeader()
             PageTitle(kicker: "Tu público", title: "Comentarios")
-            if !youtube.isConnected {
-                DemoBanner(text: "Conecta YouTube en Ajustes para ver y responder tus comentarios.", icon: "info.circle")
+            HStack(spacing: 0) {
+                ForEach(Network.allCases) { n in
+                    Button { network = n } label: {
+                        VStack(spacing: 5) {
+                            NetLogo(network: n, size: 18)
+                            Text(n.name).font(.system(size: 11, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        .foregroundStyle(network == n ? .white : Theme.muted)
+                        .background(network == n ? Theme.accent : Theme.bg2)
+                    }.buttonStyle(.plain)
+                }
+            }.overlay(Rectangle().strokeBorder(Theme.line))
+            if network == .tiktok {
+                DemoBanner(text: "TikTok todavía no permite leer ni responder comentarios desde otras apps. Próximamente.", icon: "info.circle")
+            } else if !netConnected {
+                DemoBanner(text: network == .youtube ? "Conecta YouTube en Ajustes para ver y responder tus comentarios."
+                           : "Toca «Continuar con Facebook» en Ajustes para ver y responder los comentarios de \(network.name).", icon: "info.circle")
             } else {
-                YTAccountPicker()
+                if network == .youtube { YTAccountPicker() }
                 HStack(spacing: 10) {
                     stat("Pendientes", pending.count)
                     stat("Spam", spam.count)
@@ -86,13 +112,13 @@ struct CommentsView: View {
                         .foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.vertical, 30)
                 }
                 ForEach(shown) { c in commentCard(c) }
-                Text("Cada respuesta usa cuota de la API de YouTube (unas 200 al día con la cuota gratis).")
+                Text(network == .youtube ? "Cada respuesta usa cuota de la API de YouTube (unas 200 al día con la cuota gratis)." : "Meta limita cuántas respuestas por hora se pueden enviar desde apps.")
                     .font(.caption).foregroundStyle(Theme.muted)
             }
         }
         .toolbar(.hidden, for: .navigationBar)
         .refreshable { await load() }
-        .task(id: youtube.activeID) { comments = []; await load() }
+        .task(id: "\(network.rawValue)-\(youtube.activeID ?? "")-\(meta.page?.id ?? "")") { comments = []; await load() }
         .sheet(isPresented: $editing) {
             RulesEditor(templates: $templatesRaw, rules: $rulesRaw, blocked: $blockedRaw, skipBlocked: $skipBlocked)
         }
@@ -124,7 +150,7 @@ struct CommentsView: View {
             }
             Text(c.text).font(.subheadline)
             HStack(spacing: 14) {
-                if let url = URL(string: "https://youtu.be/\(c.videoID)") { Link("Ver video", destination: url).font(.caption.bold()) }
+                if let url = URL(string: c.link ?? "https://youtu.be/\(c.videoID)") { Link("Ver publicación", destination: url).font(.caption.bold()) }
                 Button { Task { await hide(c) } } label: { Label("Ocultar", systemImage: "eye.slash") }
                     .font(.caption.bold()).foregroundStyle(Theme.red)
             }
@@ -161,11 +187,11 @@ struct CommentsView: View {
     }
 
     private func load() async {
-        guard youtube.isConnected, !loading else { return }
+        guard netConnected, !loading else { return }
         loading = true
         defer { loading = false }
         do {
-            comments = try await youtube.comments()
+            comments = network == .youtube ? try await youtube.comments() : try await meta.comments(network)
             if autoReply { await runAuto() }
         } catch {
             store.show(error.localizedDescription)
@@ -173,7 +199,8 @@ struct CommentsView: View {
     }
 
     private func runAuto() async {
-        let n = await AutoReply.run(comments, yt: youtube)
+        let net = network
+        let n = await AutoReply.run(comments) { c, text in try await sendReply(net, c, text) }
         if n > 0 {
             for i in comments.indices where AutoReply.answered.contains(comments[i].id) { comments[i].replied = true }
             store.show("\(n) \(n == 1 ? "comentario respondido" : "comentarios respondidos")")
@@ -186,7 +213,7 @@ struct CommentsView: View {
         sending.insert(c.id)
         defer { sending.remove(c.id) }
         do {
-            try await youtube.reply(to: c.commentID, text: t)
+            try await sendReply(network, c, t)
             AutoReply.answered.insert(c.id)
             if let i = comments.firstIndex(where: { $0.id == c.id }) { comments[i].replied = true }
             drafts[c.id] = nil
@@ -195,9 +222,13 @@ struct CommentsView: View {
         }
     }
 
+    private func sendReply(_ n: Network, _ c: YouTubeService.Comment, _ text: String) async throws {
+        if n == .youtube { try await youtube.reply(to: c.commentID, text: text) } else { try await meta.reply(n, to: c.commentID, text: text) }
+    }
+
     private func hide(_ c: YouTubeService.Comment) async {
         do {
-            try await youtube.hide(commentID: c.commentID)
+            if network == .youtube { try await youtube.hide(commentID: c.commentID) } else { try await meta.hide(network, commentID: c.commentID) }
             comments.removeAll { $0.id == c.id }
             store.show("Comentario ocultado")
         } catch {

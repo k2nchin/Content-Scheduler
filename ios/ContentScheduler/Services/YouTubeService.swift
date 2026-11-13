@@ -349,6 +349,7 @@ final class YouTubeService: NSObject {
         let text: String
         let date: Date
         var replied: Bool
+        var link: String? = nil
     }
 
     /// Últimos comentarios de los videos del canal.

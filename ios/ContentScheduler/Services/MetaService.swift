@@ -54,7 +54,7 @@ final class MetaService: NSObject {
             .init(name: "redirect_uri", value: "\(scheme)://authorize"),
             .init(name: "response_type", value: "token"),
             .init(name: "auth_type", value: "rerequest"),
-            .init(name: "scope", value: "pages_show_list,pages_read_engagement,pages_manage_posts,business_management,instagram_basic,instagram_content_publish"),
+            .init(name: "scope", value: "pages_show_list,pages_read_engagement,pages_manage_posts,business_management,instagram_basic,instagram_content_publish,pages_read_user_content,pages_manage_engagement,instagram_manage_comments"),
         ]
         let callback: URL = try await withCheckedThrowingContinuation { cont in
             let s = ASWebAuthenticationSession(url: c.url!, callbackURLScheme: scheme) { url, error in
@@ -155,6 +155,62 @@ final class MetaService: NSObject {
         }
         let pub = try await post("\(ig)/media_publish?creation_id=\(container)", token: p.token)
         return pub["id"] as? String ?? container
+    }
+
+    // MARK: Comentarios
+
+    typealias Comment = YouTubeService.Comment
+
+    /// Comentarios recientes de la página (Facebook) o de la cuenta de Instagram.
+    func comments(_ n: Network) async throws -> [Comment] {
+        guard let p = page, tokenValid else { throw expired }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        func date(_ s: Any?) -> Date {
+            guard let s = s as? String else { return .now }
+            return iso.date(from: s.replacingOccurrences(of: "+0000", with: "Z")) ?? .now
+        }
+        var out: [Comment] = []
+        if n == .facebook {
+            let json = try await get("\(p.id)/feed?limit=15&fields=id,permalink_url,comments.limit(30).order(reverse_chronological){id,message,from,created_time,comments.limit(10){from}}", token: p.token)
+            for post in json["data"] as? [[String: Any]] ?? [] {
+                let link = post["permalink_url"] as? String
+                for c in ((post["comments"] as? [String: Any])?["data"] as? [[String: Any]]) ?? [] {
+                    guard let id = c["id"] as? String else { continue }
+                    let from = c["from"] as? [String: Any]
+                    if (from?["id"] as? String) == p.id { continue }
+                    let replies = ((c["comments"] as? [String: Any])?["data"] as? [[String: Any]]) ?? []
+                    let mine = replies.contains { (($0["from"] as? [String: Any])?["id"] as? String) == p.id }
+                    out.append(Comment(id: "fb_" + id, commentID: id, videoID: "", author: from?["name"] as? String ?? "Alguien",
+                                       text: c["message"] as? String ?? "", date: date(c["created_time"]), replied: mine, link: link))
+                }
+            }
+        } else if n == .instagram, let ig = p.igID {
+            let json = try await get("\(ig)/media?limit=15&fields=id,permalink,comments.limit(30){id,text,username,timestamp,replies{username}}", token: p.token)
+            for m in json["data"] as? [[String: Any]] ?? [] {
+                let link = m["permalink"] as? String
+                for c in ((m["comments"] as? [String: Any])?["data"] as? [[String: Any]]) ?? [] {
+                    guard let id = c["id"] as? String else { continue }
+                    let user = c["username"] as? String ?? ""
+                    if user == p.igUsername { continue }
+                    let replies = ((c["replies"] as? [String: Any])?["data"] as? [[String: Any]]) ?? []
+                    let mine = replies.contains { ($0["username"] as? String) == p.igUsername }
+                    out.append(Comment(id: "ig_" + id, commentID: id, videoID: "", author: user.isEmpty ? "Alguien" : "@" + user,
+                                       text: c["text"] as? String ?? "", date: date(c["timestamp"]), replied: mine, link: link))
+                }
+            }
+        }
+        return out.sorted { $0.date > $1.date }
+    }
+
+    func reply(_ n: Network, to commentID: String, text: String) async throws {
+        guard let p = page, tokenValid else { throw expired }
+        _ = try await post(n == .instagram ? "\(commentID)/replies?message=\(enc(text))" : "\(commentID)/comments?message=\(enc(text))", token: p.token)
+    }
+
+    func hide(_ n: Network, commentID: String) async throws {
+        guard let p = page, tokenValid else { throw expired }
+        _ = try await post(n == .instagram ? "\(commentID)?hide=true" : "\(commentID)?is_hidden=true", token: p.token)
     }
 
     // MARK: HTTP
