@@ -16,6 +16,9 @@ La ventana de herramientas de Content Scheduler como app nativa para iPhone (Swi
 - **Estudio**: recortar el video y ponerle subtítulos automáticos en español (reconocimiento de voz del iPhone).
 - **Mejor hora**: analiza tus últimos 50 videos de YouTube y propone las horas con más vistas.
 - **Texto distinto por red** y **duplicar** un post.
+- **Primer comentario** automático al publicarse (YouTube, Facebook, Instagram).
+- **Portada** elegida en el Estudio (se sube como miniatura en YouTube) y **convertir a vertical 9:16** con fondo difuminado.
+- **Reporte semanal** los lunes, **bloqueo con Face ID** y **copia de seguridad** (exportar/restaurar).
 
 Los datos y los videos se guardan en el iPhone. **YouTube publica de verdad**: el video se sube como privado con hora de publicación y YouTube lo publica solo a esa hora. Facebook, Instagram y TikTok todavía son de prueba.
 

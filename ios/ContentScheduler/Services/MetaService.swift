@@ -209,6 +209,12 @@ final class MetaService: NSObject {
         return out.sorted { $0.date > $1.date }
     }
 
+    /// Comentario nuevo en un Reel/publicación propia (para «primer comentario»).
+    func comment(_ n: Network, on objectID: String, text: String) async throws {
+        guard let p = page, tokenValid else { throw expired }
+        _ = try await post("\(objectID)/comments?message=\(enc(text))", token: p.token)
+    }
+
     func reply(_ n: Network, to commentID: String, text: String) async throws {
         guard let p = page, tokenValid else { throw expired }
         _ = try await post(n == .instagram ? "\(commentID)/replies?message=\(enc(text))" : "\(commentID)/comments?message=\(enc(text))", token: p.token)

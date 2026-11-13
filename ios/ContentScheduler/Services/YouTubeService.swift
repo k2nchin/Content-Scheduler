@@ -377,6 +377,24 @@ final class YouTubeService: NSObject {
         }
     }
 
+    /// Comentario nuevo en un video (lo usa «primer comentario»).
+    func comment(on videoID: String, text: String, account: String? = nil) async throws {
+        _ = try await api("POST", "commentThreads?part=snippet", body: ["snippet": ["videoId": videoID, "topLevelComment": ["snippet": ["textOriginal": text]]]], account: account)
+    }
+
+    /// Sube la portada del video (YouTube exige que el canal esté verificado por teléfono).
+    func setThumbnail(videoID: String, jpeg: Data, account: String? = nil) async throws {
+        var req = URLRequest(url: URL(string: "https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=\(videoID)")!)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(try await token(for: account))", forHTTPHeaderField: "Authorization")
+        req.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        let (data, resp) = try await URLSession.shared.upload(for: req, from: jpeg)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            throw Self.error(status: status, json: (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:])
+        }
+    }
+
     func reply(to commentID: String, text: String) async throws {
         _ = try await api("POST", "comments?part=snippet", body: ["snippet": ["parentId": commentID, "textOriginal": text]])
     }

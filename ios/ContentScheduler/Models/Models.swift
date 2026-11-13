@@ -66,6 +66,10 @@ struct YTInfo: Codable, Hashable {
     var likes: Int?
     /// Canal de YouTube al que se subió.
     var account: String?
+    /// Ya se puso el primer comentario.
+    var commented: Bool?
+    /// Ya se subió la portada.
+    var coverSet: Bool?
 }
 
 /// Estado de la publicación en Facebook o Instagram.
@@ -94,6 +98,10 @@ struct Post: Codable, Identifiable, Hashable {
     var fb: NetInfo?
     /// Título o texto distinto por red (clave: rawValue de la red). Vacío = usar el título general.
     var custom: [String: String]?
+    /// Comentario que se pone solo al publicarse (YouTube, Facebook, Instagram).
+    var firstComment: String?
+    /// Portada elegida en el Estudio (JPEG).
+    var cover: Data?
     var ig: NetInfo?
 
     func text(for n: Network) -> String {

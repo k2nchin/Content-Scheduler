@@ -24,6 +24,10 @@ enum Publisher {
                 $0.status = now ? .published : .scheduled
                 if now { $0.date = .now }
             }
+            if let p = store.post(id), let cover = p.cover {
+                if (try? await yt.setThumbnail(videoID: videoID, jpeg: cover)) != nil { store.update(id) { $0.yt?.coverSet = true } }
+                else { store.show("La portada no se pudo poner: YouTube exige verificar tu canal por teléfono.") }
+            }
             if let p = store.post(id), !needsFile(p) { store.deleteVideoFile(of: id) }
             Notifier.send(now ? "Publicado en YouTube" : "Programado en YouTube", post.title)
             store.show(now ? "Publicado en YouTube" : "Subido. YouTube lo publica \(post.date.dayLabel.lowercased()) a las \(post.date.hm)")
@@ -59,6 +63,7 @@ enum Publisher {
             if let s = try? await yt.states(for: posts.compactMap { $0.yt?.videoID }, account: acc) { states.merge(s) { a, _ in a } }
             else { return }
         }
+        var newlyPublished: [UUID] = []
         for post in store.state.posts {
             guard let vid = post.yt?.videoID else { continue }
             guard byAccount.keys.contains(post.yt?.account ?? yt.channel?.id ?? ""),
@@ -76,7 +81,7 @@ enum Publisher {
                     p.errorMessage = "YouTube rechazó el video (\(reason))."
                     p.yt?.state = .failed
                 } else if s.isPublic {
-                    if p.yt?.state != .published { Notifier.send("¡Ya se publicó en YouTube!", p.title) }
+                    if p.yt?.state != .published { Notifier.send("¡Ya se publicó en YouTube!", p.title); newlyPublished.append(post.id) }
                     p.yt?.state = .published
                     p.status = .published
                     p.errorMessage = nil
@@ -85,6 +90,14 @@ enum Publisher {
                 }
             }
         }
+        // Primer comentario cuando el video ya es público
+        for p in store.state.posts where p.yt?.state == .published && p.yt?.commented != true {
+            guard let text = p.firstComment?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty, let vid = p.yt?.videoID else { continue }
+            if (try? await yt.comment(on: vid, text: text, account: p.yt?.account)) != nil {
+                store.update(p.id) { $0.yt?.commented = true }
+            }
+        }
+        _ = newlyPublished
     }
 
     // MARK: Facebook e Instagram
@@ -106,6 +119,7 @@ enum Publisher {
                 let vid = try await meta.publishFacebook(file: file, description: caption(p, .facebook), at: now ? nil : p.date)
                 let scheduled = !now && p.date > Date.now.addingTimeInterval(10 * 60)
                 store.update(id) { $0.fb = NetInfo(state: scheduled ? .scheduled : .published, id: vid) }
+                if !scheduled, let text = p.firstComment, !text.isEmpty { try? await meta.comment(.facebook, on: vid, text: text) }
                 Notifier.send(scheduled ? "Programado en Facebook" : "Publicado en Facebook", p.title)
                 store.show(scheduled ? "Programado en Facebook" : "Publicado en Facebook")
             } catch {
@@ -129,6 +143,7 @@ enum Publisher {
         do {
             let mid = try await meta.publishInstagram(file: file, caption: caption(p, .instagram))
             store.update(id) { $0.ig = NetInfo(state: .published, id: mid) }
+            if let text = p.firstComment, !text.isEmpty { try? await meta.comment(.instagram, on: mid, text: text) }
             Notifier.send("Publicado en Instagram", p.title)
             store.show("Publicado en Instagram")
         } catch {

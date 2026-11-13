@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(AppStore.self) private var store
@@ -8,6 +9,11 @@ struct SettingsView: View {
     @State private var connectingMeta = false
     @State private var closing: YTChannel?
     @State private var confirmMeta = false
+    @AppStorage("cs.lock") private var lock = false
+    @AppStorage("cs.weekly") private var weekly = true
+    @State private var exporting = false
+    @State private var importing = false
+    @State private var backupDoc = BackupDocument(data: Data())
 
     var body: some View {
         NavigationStack {
@@ -112,9 +118,44 @@ struct SettingsView: View {
                     }
                 }
 
+                SectionLabel(text: "Seguridad y respaldo")
+                Card {
+                    Toggle(isOn: $weekly) {
+                        VStack(alignment: .leading) {
+                            Text("Reporte semanal").bold()
+                            Text("Cada lunes: seguidores de tus cuentas y lo que publicaste en la semana.").font(.caption).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    Divider().overlay(Theme.line)
+                    Toggle(isOn: $lock) {
+                        VStack(alignment: .leading) {
+                            Text("Bloquear con Face ID").bold()
+                            Text("Pide tu cara o tu código al abrir la app.").font(.caption).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    Divider().overlay(Theme.line)
+                    Button { backupDoc = BackupManager.make(store); exporting = true } label: {
+                        Label("Exportar copia de seguridad", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, alignment: .leading)
+                    }.buttonStyle(.plain)
+                    Button { importing = true } label: {
+                        Label("Restaurar desde una copia", systemImage: "square.and.arrow.down").frame(maxWidth: .infinity, alignment: .leading)
+                    }.buttonStyle(.plain)
+                    Text("Guarda tu cola, horarios, reglas de comentarios y grupos de hashtags (sin los archivos de video).")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                }
+
                 Text("CONTENT SCHEDULER · iOS").font(Theme.mono).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 20)
             }
             .toolbar(.hidden, for: .navigationBar)
+            .fileExporter(isPresented: $exporting, document: backupDoc, contentType: .json,
+                          defaultFilename: "ContentScheduler-\(Date.now.formatted(.iso8601.year().month().day()))") { result in
+                if case .success = result { store.show("Copia de seguridad guardada") }
+            }
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+                guard case .success(let url) = result else { return }
+                do { try BackupManager.restore(url, into: store); store.show("Copia restaurada") }
+                catch { store.show("Ese archivo no es una copia válida de Content Scheduler.") }
+            }
             .confirmationDialog("¿Cerrar sesión de \(closing?.title ?? "esta cuenta")?", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil } }), titleVisibility: .visible) {
                 Button("Cerrar sesión", role: .destructive) {
                     if let c = closing { youtube.disconnect(c.id); store.show("Sesión cerrada: \(c.title)") }

@@ -11,6 +11,7 @@ struct PostEditor: View {
     @State private var title = ""
     @State private var tags = ""
     @State private var custom: [String: String] = [:]
+    @State private var firstComment = ""
     @State private var perNetwork = false
     @State private var studio = false
     @State private var networks: Set<Network> = []
@@ -81,6 +82,10 @@ struct PostEditor: View {
                     } label: {
                         Text("Texto distinto por red").font(.footnote.bold())
                     }.tint(Theme.fg)
+
+                    Text("Primer comentario (opcional)").font(.caption).foregroundStyle(Theme.muted).padding(.top, 6)
+                    TextField("Se pone solo al publicarse: un link, más hashtags…", text: $firstComment, axis: .vertical)
+                        .lineLimit(1...3).padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
 
                     Text("Redes").font(.caption).foregroundStyle(Theme.muted).padding(.top, 6)
                     HStack(spacing: 8) {
@@ -235,7 +240,7 @@ struct PostEditor: View {
 
     private func load() {
         guard !loaded, let post else { return }
-        title = post.title; tags = post.tags; networks = post.networks; date = post.date; custom = post.custom ?? [:]
+        title = post.title; tags = post.tags; networks = post.networks; date = post.date; custom = post.custom ?? [:]; firstComment = post.firstComment ?? ""
         perNetwork = !(post.custom ?? [:]).values.allSatisfy { $0.isEmpty }; loaded = true
     }
 
@@ -247,6 +252,8 @@ struct PostEditor: View {
             $0.networks = networks
             $0.date = date
             $0.custom = custom.filter { !$0.value.trimmingCharacters(in: .whitespaces).isEmpty }
+            let fc = firstComment.trimmingCharacters(in: .whitespacesAndNewlines)
+            $0.firstComment = fc.isEmpty ? nil : fc
         }
         guard let after = post else { return nil }
         return (before.title != after.title || before.tags != after.tags || before.date != after.date || before.custom != after.custom, after)

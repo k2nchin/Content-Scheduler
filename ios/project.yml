@@ -27,6 +27,7 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UIUserInterfaceStyle: Dark
         INFOPLIST_KEY_NSPhotoLibraryUsageDescription: Para elegir los videos que vas a programar.
+        INFOPLIST_KEY_NSFaceIDUsageDescription: Para proteger la app con Face ID.
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: Para crear los subtítulos automáticos de tus videos.
     info:
       path: ContentScheduler/Info.plist

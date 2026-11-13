@@ -13,6 +13,10 @@ struct StudioView: View {
     @State private var start = 0.0
     @State private var end = 0.0
     @State private var subtitles = true
+    @State private var vertical = false
+    @State private var isHorizontal = false
+    @State private var coverTime = 0.0
+    @State private var coverImage: UIImage?
     @State private var working = false
     @State private var status = ""
 
@@ -44,6 +48,30 @@ struct StudioView: View {
                             .font(.caption).foregroundStyle(end - start > 180 ? Theme.warn : Theme.muted)
                     }
                     Box {
+                        Text("PORTADA").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                        HStack(alignment: .top, spacing: 12) {
+                            Group {
+                                if let coverImage { Image(uiImage: coverImage).resizable().scaledToFill() } else { Theme.bg3 }
+                            }
+                            .frame(width: 72, height: 110).clipShape(RoundedRectangle(cornerRadius: 8))
+                            VStack(alignment: .leading, spacing: 6) {
+                                Slider(value: $coverTime, in: 0...duration) { editing in if !editing { Task { await grabCover() } } }
+                                Text("Elige el momento para la portada (\(clock(coverTime))). En YouTube se sube como miniatura; tu canal tiene que estar verificado por teléfono.")
+                                    .font(.caption).foregroundStyle(Theme.muted)
+                            }
+                        }
+                    }
+                    if isHorizontal {
+                        Box {
+                            Toggle(isOn: $vertical) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Convertir a vertical 9:16").bold()
+                                    Text("Para Reels y Shorts: el video queda al centro con el fondo difuminado.").font(.caption).foregroundStyle(Theme.muted)
+                                }
+                            }
+                        }
+                    }
+                    Box {
                         Toggle(isOn: $subtitles) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Subtítulos automáticos").bold()
@@ -73,10 +101,26 @@ struct StudioView: View {
     private func load() async {
         guard let source else { return }
         player = AVPlayer(url: source)
-        if let d = try? await AVURLAsset(url: source).load(.duration) {
+        let asset = AVURLAsset(url: source)
+        if let d = try? await asset.load(.duration) {
             duration = max(1, d.seconds)
             end = duration
+            coverTime = min(1, duration / 3)
         }
+        if let track = try? await asset.loadTracks(withMediaType: .video).first,
+           let size = try? await track.load(.naturalSize), let t = try? await track.load(.preferredTransform) {
+            let r = size.applying(t)
+            isHorizontal = abs(r.width) > abs(r.height)
+        }
+        await grabCover()
+    }
+
+    private func grabCover() async {
+        guard let source else { return }
+        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: source))
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 1280, height: 1280)
+        if let r = try? await gen.image(at: CMTime(seconds: coverTime, preferredTimescale: 600)) { coverImage = UIImage(cgImage: r.image) }
     }
 
     private func apply() {
@@ -85,7 +129,8 @@ struct StudioView: View {
         player?.pause()
         Task {
             do {
-                let url = try await StudioExport.run(source: source, start: start, end: end, subtitles: subtitles) { status = $0 }
+                let url = try await StudioExport.run(source: source, start: start, end: end, subtitles: subtitles, vertical: vertical) { status = $0 }
+                if let coverImage, let jpeg = coverImage.jpegData(compressionQuality: 0.85) { store.update(postID) { $0.cover = jpeg } }
                 await store.replaceVideo(of: postID, with: url)
                 store.show(subtitles ? "Video recortado con subtítulos" : "Video recortado")
                 dismiss()
@@ -101,7 +146,14 @@ struct StudioView: View {
 enum StudioExport {
     struct Line { let text: String; let start: Double; let end: Double }
 
-    static func run(source: URL, start: Double, end: Double, subtitles: Bool, status: @escaping (String) -> Void) async throws -> URL {
+    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, status: @escaping (String) -> Void) async throws -> URL {
+        var source = source
+        var start = start, end = end
+        if vertical {
+            status("Pasando a vertical 9:16…")
+            source = try await makeVertical(source, start: start, end: end)
+            end -= start; start = 0
+        }
         let asset = AVURLAsset(url: source)
         let range = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600), end: CMTime(seconds: end, preferredTimescale: 600))
 
@@ -186,6 +238,39 @@ enum StudioExport {
             throw YTError(message: "No se pudo crear el video: \(export.error?.localizedDescription ?? "error desconocido")")
         }
         return out
+    }
+
+    /// Video horizontal a 1080×1920: al centro, con el mismo video ampliado y difuminado de fondo.
+    private static func makeVertical(_ url: URL, start: Double, end: Double) async throws -> URL {
+        let asset = AVURLAsset(url: url)
+        let out = CGSize(width: 1080, height: 1920)
+        let vc = try await AVMutableVideoComposition.videoComposition(with: asset) { req in
+            let src = req.sourceImage.clampedToExtent().cropped(to: req.sourceImage.extent)
+            let e = src.extent
+            let fill = max(out.width / e.width, out.height / e.height)
+            let bg = src.transformed(by: CGAffineTransform(scaleX: fill, y: fill))
+                .clampedToExtent().applyingGaussianBlur(sigma: 40)
+            let bgE = src.transformed(by: CGAffineTransform(scaleX: fill, y: fill)).extent
+            let bgMoved = bg.transformed(by: CGAffineTransform(translationX: -bgE.minX - (bgE.width - out.width) / 2, y: -bgE.minY - (bgE.height - out.height) / 2))
+                .cropped(to: CGRect(origin: .zero, size: out))
+            let fit = min(out.width / e.width, out.height / e.height)
+            let fg = src.transformed(by: CGAffineTransform(scaleX: fit, y: fit))
+            let fgE = fg.extent
+            let fgMoved = fg.transformed(by: CGAffineTransform(translationX: -fgE.minX + (out.width - fgE.width) / 2, y: -fgE.minY + (out.height - fgE.height) / 2))
+            req.finish(with: fgMoved.composited(over: bgMoved), context: nil)
+        }
+        vc.renderSize = out
+        guard let ex = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+            throw YTError(message: "No se pudo preparar el video vertical.")
+        }
+        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
+        ex.videoComposition = vc
+        ex.outputURL = dest
+        ex.outputFileType = .mp4
+        ex.timeRange = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600), end: CMTime(seconds: end, preferredTimescale: 600))
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in ex.exportAsynchronously { c.resume() } }
+        guard ex.status == .completed else { throw YTError(message: "No se pudo pasar a vertical: \(ex.error?.localizedDescription ?? "error")") }
+        return dest
     }
 
     private static func exportAudio(_ asset: AVAsset, range: CMTimeRange) async throws -> URL {

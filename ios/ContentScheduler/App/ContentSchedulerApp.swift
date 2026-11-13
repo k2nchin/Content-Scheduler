@@ -50,11 +50,14 @@ struct ContentSchedulerApp: App {
         await Publisher.refresh(store: store, yt: yt)
         await meta.refresh()
         await Publisher.publishDue(store: store, meta: meta)
+        WeeklyReport.sendIfDue(store: store, yt: yt, meta: meta)
     }
 
     @MainActor
     static func backgroundWork(store: AppStore, yt: YouTubeService, meta: MetaService) async {
         await Publisher.publishDue(store: store, meta: meta)
+        await meta.refresh()
+        WeeklyReport.sendIfDue(store: store, yt: yt, meta: meta)
         if AutoReply.enabled {
             for n in [Network.facebook, .instagram] where (n == .facebook ? meta.facebookConnected : meta.instagramConnected) {
                 if let list = try? await meta.comments(n) {
@@ -82,6 +85,8 @@ struct ContentSchedulerApp: App {
 struct RootView: View {
     @Environment(AppStore.self) private var store
     @State private var tab: AppTab = .contenido
+    @State private var locked = AppLock.enabled
+    @Environment(\.scenePhase) private var phase
 
     var body: some View {
         ZStack {
@@ -110,5 +115,7 @@ struct RootView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: store.toast)
+        .overlay { if locked { LockScreen { locked = false } } }
+        .onChange(of: phase) { _, p in if p == .background && AppLock.enabled { locked = true } }
     }
 }
