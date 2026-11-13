@@ -1,9 +1,13 @@
 import SwiftUI
+import PhotosUI
 
 struct CalendarView: View {
     @Environment(AppStore.self) private var store
+    @Environment(YouTubeService.self) private var youtube
     @State private var selected = 0
     @State private var editing: UUID?
+    @State private var pick: PhotosPickerItem?
+    @State private var targetTime: Date?
 
     private var days: [Date] {
         let start = Calendar.current.startOfDay(for: .now)
@@ -41,10 +45,13 @@ struct CalendarView: View {
                         VStack(spacing: 8) {
                             let ps = ofDay.filter { $0.date.hm == t }
                             if ps.isEmpty {
-                                HStack { Image(systemName: "plus"); Text("Espacio libre") }
-                                    .font(.footnote).foregroundStyle(Theme.muted)
-                                    .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-                                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
+                                PhotosPicker(selection: $pick, matching: .videos) {
+                                    HStack { Image(systemName: "plus"); Text("Espacio libre") }
+                                        .font(.footnote).foregroundStyle(Theme.muted)
+                                        .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
+                                }
+                                .simultaneousGesture(TapGesture().onEnded { targetTime = time(t, on: day) })
                             }
                             ForEach(ps) { p in Button { editing = p.id } label: { PostRow(post: p) }.buttonStyle(.plain) }
                         }
@@ -54,6 +61,22 @@ struct CalendarView: View {
                 }
             }
             .sheet(item: $editing) { PostEditor(postID: $0) }
+            .onChange(of: pick) { _, item in addAtSlot(item) }
+        }
+    }
+
+    private func time(_ hm: String, on day: Date) -> Date {
+        let p = hm.split(separator: ":").compactMap { Int($0) }
+        return Calendar.current.date(bySettingHour: p.first ?? 9, minute: p.count > 1 ? p[1] : 0, second: 0, of: day) ?? day
+    }
+
+    private func addAtSlot(_ item: PhotosPickerItem?) {
+        guard let item, let when = targetTime else { return }
+        pick = nil; targetTime = nil
+        if when < .now { return store.show("Ese horario ya pasó") }
+        Task {
+            guard let movie = try? await item.loadTransferable(type: PickedMovie.self) else { return store.show("No se pudo leer el video.") }
+            editing = await store.addVideo(from: movie.url, youtubeConnected: youtube.isConnected, at: when)
         }
     }
 }

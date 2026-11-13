@@ -50,6 +50,26 @@ struct StatsView: View {
                     .chartForegroundStyleScale(["Facebook": Network.facebook.color, "Instagram": Network.instagram.color, "TikTok": Network.tiktok.color])
                     .frame(height: 180)
                 }
+                SectionLabel(text: "Por red (ejemplo)")
+                Card {
+                    let perNet = [Network.facebook, .instagram, .tiktok, .youtube].map { n in
+                        (n, data.filter { $0.network == n }.reduce(0) { $0 + $1.views })
+                    }.sorted { $0.1 > $1.1 }
+                    let maxNet = max(perNet.first?.1 ?? 1, 1)
+                    ForEach(perNet, id: \.0) { n, v in
+                        HStack(spacing: 10) {
+                            NetBadge(network: n)
+                            Text(n.name).font(.footnote).frame(width: 74, alignment: .leading)
+                            GeometryReader { geo in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Theme.bg3).frame(height: 9)
+                                    Capsule().fill(n.color).frame(width: geo.size.width * (v / maxNet), height: 9)
+                                }
+                            }.frame(height: 9)
+                            Text(v > 0 ? compact(v) : "—").font(.system(size: 12, design: .monospaced)).frame(width: 48, alignment: .trailing)
+                        }
+                    }
+                }
                 SectionLabel(text: "Tus mejores horas (ejemplo)")
                 Card {
                     heatmap
@@ -57,6 +77,26 @@ struct StatsView: View {
                 }
                 SectionLabel(text: "Hashtags que más rinden (ejemplo)")
                 FlowTags(tags: [("#viral", 38), ("#envivo", 27), ("#meme", 22), ("#musica", 15), ("#parati", 9), ("#latino", 6)])
+
+                let top = store.state.posts.sorted { $0.title.count > $1.title.count }.prefix(3)
+                if !top.isEmpty {
+                    SectionLabel(text: "Lo más visto")
+                    ForEach(Array(top.enumerated()), id: \.element.id) { i, p in
+                        HStack(spacing: 12) {
+                            Thumb(post: p, width: 54)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(p.title).font(.subheadline.weight(.semibold)).lineLimit(2)
+                                Text("\(compact(total * [0.21, 0.13, 0.08][i])) vistas · ejemplo").font(.caption).foregroundStyle(Theme.muted)
+                            }
+                            Spacer(minLength: 0)
+                            Button { store.recycle(p.id) } label: { Image(systemName: "arrow.clockwise").padding(10) }
+                                .background(Theme.bg3, in: RoundedRectangle(cornerRadius: 9))
+                        }
+                        .padding(10)
+                        .background(Theme.bg2, in: RoundedRectangle(cornerRadius: 14))
+                        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.line))
+                    }
+                }
             }
         }
     }
