@@ -98,6 +98,26 @@ final class AppStore {
         return post.id
     }
 
+    /// Cambia el video de un post por uno nuevo (por ejemplo, el que sale del Estudio).
+    func replaceVideo(of id: UUID, with url: URL) async {
+        let asset = AVURLAsset(url: url)
+        var duration = 30
+        if let d = try? await asset.load(.duration) { duration = max(1, Int(d.seconds.rounded())) }
+        var thumb: Data?
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 240, height: 240)
+        if let r = try? await gen.image(at: CMTime(seconds: min(1, Double(duration) / 3), preferredTimescale: 600)) {
+            thumb = UIImage(cgImage: r.image).jpegData(compressionQuality: 0.6)
+        }
+        deleteVideoFile(of: id)
+        update(id) {
+            $0.videoFile = url.lastPathComponent
+            $0.duration = duration
+            if let thumb { $0.thumbnail = thumb }
+        }
+    }
+
     func deleteVideoFile(of id: UUID) {
         guard let name = post(id)?.videoFile else { return }
         try? FileManager.default.removeItem(at: Self.videosDir.appendingPathComponent(name))
@@ -109,12 +129,31 @@ final class AppStore {
         state.posts.removeAll { $0.id == id }
     }
 
+    /// Copia del post (con su video si todavía está en la app) en el siguiente horario libre.
+    @discardableResult
+    func duplicate(_ id: UUID) -> UUID? {
+        guard var copy = post(id) else { return nil }
+        copy.id = UUID()
+        copy.status = .scheduled
+        copy.errorMessage = nil
+        copy.yt = nil; copy.fb = nil; copy.ig = nil
+        if let name = copy.videoFile {
+            let src = Self.videosDir.appendingPathComponent(name)
+            let dest = Self.videosDir.appendingPathComponent(UUID().uuidString + "." + src.pathExtension)
+            copy.videoFile = (try? FileManager.default.copyItem(at: src, to: dest)) != nil ? dest.lastPathComponent : nil
+        }
+        copy.date = nextFreeSlot()
+        state.posts.append(copy)
+        show("Post duplicado para \(copy.date.dayLabel.lowercased()) a las \(copy.date.hm)")
+        return copy.id
+    }
+
     func recycle(_ id: UUID) {
         guard var copy = post(id) else { return }
         copy.id = UUID()
         copy.status = .scheduled
         copy.errorMessage = nil
-        copy.yt = nil
+        copy.yt = nil; copy.fb = nil; copy.ig = nil
         copy.videoFile = nil
         copy.date = nextFreeSlot()
         copy.tags = ["#parati", "#fyp", "#tendencia", "#viral", "#reels"].shuffled().prefix(3).joined(separator: " ")

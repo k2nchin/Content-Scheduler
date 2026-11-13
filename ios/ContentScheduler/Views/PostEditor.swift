@@ -10,6 +10,9 @@ struct PostEditor: View {
 
     @State private var title = ""
     @State private var tags = ""
+    @State private var custom: [String: String] = [:]
+    @State private var perNetwork = false
+    @State private var studio = false
     @State private var networks: Set<Network> = []
     @State private var date = Date.now
     @State private var loaded = false
@@ -63,6 +66,22 @@ struct PostEditor: View {
                         }
                     }.scrollIndicators(.hidden)
 
+                    DisclosureGroup(isExpanded: $perNetwork) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(Network.allCases.filter { networks.contains($0) && $0.isReal }) { n in
+                                HStack(alignment: .top, spacing: 8) {
+                                    NetBadge(network: n).padding(.top, 10)
+                                    TextField(n == .youtube ? "Título para YouTube (máx. 100)" : "Texto para \(n.name)",
+                                              text: Binding(get: { custom[n.rawValue] ?? "" }, set: { custom[n.rawValue] = $0 }), axis: .vertical)
+                                        .lineLimit(1...4).padding(10).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
+                                }
+                            }
+                            Text("Si lo dejas vacío, se usa el título general.").font(.caption).foregroundStyle(Theme.muted)
+                        }.padding(.top, 6)
+                    } label: {
+                        Text("Texto distinto por red").font(.footnote.bold())
+                    }.tint(Theme.fg)
+
                     Text("Redes").font(.caption).foregroundStyle(Theme.muted).padding(.top, 6)
                     HStack(spacing: 8) {
                         ForEach(Network.allCases) { n in
@@ -97,6 +116,14 @@ struct PostEditor: View {
                     }.padding(.top, 12).disabled(uploading || busy)
                     Button { save(post) } label: { Text(saveLabel(post)) }
                         .buttonStyle(PrimaryButtonStyle()).disabled(uploading || busy)
+                    HStack(spacing: 10) {
+                        if Publisher.fileURL(post) != nil && post.yt?.videoID == nil && post.fb == nil && post.ig == nil {
+                            Button { studio = true } label: { Label("Estudio", systemImage: "wand.and.stars") }
+                                .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.fg))
+                        }
+                        Button { _ = write(); if let id = store.duplicate(postID) { dismiss(); _ = id } } label: { Label("Duplicar", systemImage: "plus.square.on.square") }
+                            .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.fg))
+                    }.disabled(busy)
                     Button(role: .destructive) { confirmDelete = true } label: { Label("Eliminar", systemImage: "trash") }
                         .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.red)).disabled(uploading || busy)
                 }
@@ -109,6 +136,7 @@ struct PostEditor: View {
             }
             .onAppear(perform: load)
             .onChange(of: pick) { _, item in attach(item) }
+            .fullScreenCover(isPresented: $studio) { StudioView(postID: postID) }
             .confirmationDialog("¿Eliminar este post?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 if let post, let vid = post.yt?.videoID, post.yt?.state != .published {
                     Button("Eliminar aquí y en YouTube", role: .destructive) {
@@ -207,7 +235,8 @@ struct PostEditor: View {
 
     private func load() {
         guard !loaded, let post else { return }
-        title = post.title; tags = post.tags; networks = post.networks; date = post.date; loaded = true
+        title = post.title; tags = post.tags; networks = post.networks; date = post.date; custom = post.custom ?? [:]
+        perNetwork = !(post.custom ?? [:]).values.allSatisfy { $0.isEmpty }; loaded = true
     }
 
     private func write() -> (changed: Bool, post: Post)? {
@@ -217,9 +246,10 @@ struct PostEditor: View {
             $0.tags = tags
             $0.networks = networks
             $0.date = date
+            $0.custom = custom.filter { !$0.value.trimmingCharacters(in: .whitespaces).isEmpty }
         }
         guard let after = post else { return nil }
-        return (before.title != after.title || before.tags != after.tags || before.date != after.date, after)
+        return (before.title != after.title || before.tags != after.tags || before.date != after.date || before.custom != after.custom, after)
     }
 
     private var wantsMeta: Bool {

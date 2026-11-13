@@ -92,7 +92,14 @@ struct Post: Codable, Identifiable, Hashable {
     var errorMessage: String?
     var yt: YTInfo?
     var fb: NetInfo?
+    /// Título o texto distinto por red (clave: rawValue de la red). Vacío = usar el título general.
+    var custom: [String: String]?
     var ig: NetInfo?
+
+    func text(for n: Network) -> String {
+        let t = custom?[n.rawValue]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return t.isEmpty ? title : t
+    }
 
     var durationText: String { "\(duration / 60):" + String(format: "%02d", duration % 60) }
     var tagList: [String] {

@@ -8,6 +8,8 @@ struct CalendarView: View {
     @State private var editing: UUID?
     @State private var pick: PhotosPickerItem?
     @State private var targetTime: Date?
+    @State private var hours: [YouTubeService.HourStat] = []
+    @State private var loadingHours = false
     @State private var newSlot = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: .now) ?? .now
 
     private var days: [Date] {
@@ -21,6 +23,7 @@ struct CalendarView: View {
                 AppHeader()
                 PageTitle(kicker: "Tu semana", title: "Horarios")
                 Text("Cada video nuevo toma el siguiente horario libre.").font(.footnote).foregroundStyle(Theme.muted)
+                if youtube.isConnected { bestHoursBox }
                 Box {
                     Text("HORARIOS DE PUBLICACIÓN").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
                     FlowSlots(slots: store.state.slots.sorted()) { s in
@@ -95,5 +98,45 @@ struct CalendarView: View {
             guard let movie = try? await item.loadTransferable(type: PickedMovie.self) else { return store.show("No se pudo leer el video.") }
             editing = await store.addVideo(from: movie.url, youtubeConnected: youtube.isConnected, at: when)
         }
+    }
+
+    private var bestHoursBox: some View {
+        Box {
+            HStack {
+                Text("MEJOR HORA SEGÚN TU CANAL").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                Spacer()
+                if loadingHours { ProgressView() }
+            }
+            if hours.isEmpty && !loadingHours {
+                Button { Task { await loadHours() } } label: { Label("Analizar mis últimos 50 videos", systemImage: "sparkles") }
+                    .buttonStyle(BoxButtonStyle())
+            }
+            let top = Array(hours.prefix(3))
+            let maxV = max(top.first?.avgViews ?? 1, 1)
+            ForEach(top) { h in
+                HStack(spacing: 10) {
+                    Text(String(format: "%02d:00", h.hour)).font(.system(size: 14, weight: .bold, design: .monospaced)).frame(width: 56, alignment: .leading)
+                    GeometryReader { g in
+                        Capsule().fill(Theme.accent).frame(width: g.size.width * h.avgViews / maxV, height: 8).frame(maxHeight: .infinity)
+                    }.frame(height: 18)
+                    Text("\(compact(h.avgViews)) prom.").font(.caption).foregroundStyle(Theme.muted).frame(width: 74, alignment: .trailing)
+                }
+            }
+            if !top.isEmpty {
+                Text("Vistas promedio de tus videos según la hora en que se publicaron (\(hours.reduce(0) { $0 + $1.videos }) videos).")
+                    .font(.caption).foregroundStyle(Theme.muted)
+                Button {
+                    store.state.slots = top.map { String(format: "%02d:00", $0.hour) }.sorted()
+                    store.show("Horarios cambiados a tus mejores horas")
+                } label: { Text("Usar estas horas") }.buttonStyle(BoxButtonStyle(filled: true))
+            }
+        }
+    }
+
+    private func loadHours() async {
+        loadingHours = true
+        do { hours = try await youtube.bestHours() } catch { store.show(error.localizedDescription) }
+        if hours.isEmpty { store.show("Tu canal todavía no tiene videos para analizar.") }
+        loadingHours = false
     }
 }

@@ -1,0 +1,247 @@
+import SwiftUI
+import AVKit
+import Speech
+
+/// Estudio: recortar el video y ponerle subtítulos automáticos (reconocimiento de voz del iPhone).
+struct StudioView: View {
+    let postID: UUID
+    @Environment(AppStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var player: AVPlayer?
+    @State private var duration = 0.0
+    @State private var start = 0.0
+    @State private var end = 0.0
+    @State private var subtitles = true
+    @State private var working = false
+    @State private var status = ""
+
+    private var source: URL? { store.post(postID).flatMap(Publisher.fileURL) }
+
+    var body: some View {
+        NavigationStack {
+            Screen {
+                PageTitle(kicker: "Edita tu clip", title: "Estudio")
+                if let player {
+                    VideoPlayer(player: player)
+                        .frame(height: 380).frame(maxWidth: .infinity)
+                        .background(.black).clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                if duration > 0 {
+                    Box {
+                        Text("RECORTAR").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                        HStack {
+                            Text("Inicio").font(.footnote).frame(width: 52, alignment: .leading)
+                            Slider(value: $start, in: 0...duration) { editing in if !editing { seek(start) } }
+                            Text(clock(start)).font(.system(size: 12, design: .monospaced)).frame(width: 44)
+                        }
+                        HStack {
+                            Text("Final").font(.footnote).frame(width: 52, alignment: .leading)
+                            Slider(value: $end, in: 0...duration) { editing in if !editing { seek(max(start, end - 2)) } }
+                            Text(clock(end)).font(.system(size: 12, design: .monospaced)).frame(width: 44)
+                        }
+                        Text("Duración del clip: \(clock(max(0, end - start)))" + (end - start > 180 ? " · más de 3 min no cuenta como Short" : ""))
+                            .font(.caption).foregroundStyle(end - start > 180 ? Theme.warn : Theme.muted)
+                    }
+                    Box {
+                        Toggle(isOn: $subtitles) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Subtítulos automáticos").bold()
+                                Text("El iPhone escucha el audio en español y pone el texto sobre el video.").font(.caption).foregroundStyle(Theme.muted)
+                            }
+                        }
+                    }
+                    if working {
+                        HStack { ProgressView(); Text(status).font(.footnote) }.frame(maxWidth: .infinity)
+                    }
+                    Button { apply() } label: { Text("Aplicar cambios") }
+                        .buttonStyle(PrimaryButtonStyle()).disabled(working || end - start < 1)
+                    Text("Se crea un video nuevo con estos cambios y reemplaza al anterior en este post.")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                }
+            }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { dismiss() }.disabled(working) } }
+            .task { await load() }
+            .onChange(of: start) { _, v in if v > end - 1 { start = max(0, end - 1) } }
+            .onChange(of: end) { _, v in if v < start + 1 { end = min(duration, start + 1) } }
+        }
+    }
+
+    private func clock(_ s: Double) -> String { String(format: "%d:%02d", Int(s) / 60, Int(s) % 60) }
+    private func seek(_ s: Double) { player?.seek(to: CMTime(seconds: s, preferredTimescale: 600)) }
+
+    private func load() async {
+        guard let source else { return }
+        player = AVPlayer(url: source)
+        if let d = try? await AVURLAsset(url: source).load(.duration) {
+            duration = max(1, d.seconds)
+            end = duration
+        }
+    }
+
+    private func apply() {
+        guard let source else { return }
+        working = true
+        player?.pause()
+        Task {
+            do {
+                let url = try await StudioExport.run(source: source, start: start, end: end, subtitles: subtitles) { status = $0 }
+                await store.replaceVideo(of: postID, with: url)
+                store.show(subtitles ? "Video recortado con subtítulos" : "Video recortado")
+                dismiss()
+            } catch {
+                store.show(error.localizedDescription)
+            }
+            working = false
+        }
+    }
+}
+
+@MainActor
+enum StudioExport {
+    struct Line { let text: String; let start: Double; let end: Double }
+
+    static func run(source: URL, start: Double, end: Double, subtitles: Bool, status: @escaping (String) -> Void) async throws -> URL {
+        let asset = AVURLAsset(url: source)
+        let range = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600), end: CMTime(seconds: end, preferredTimescale: 600))
+
+        var lines: [Line] = []
+        if subtitles {
+            status("Escuchando el audio…")
+            let audio = try await exportAudio(asset, range: range)
+            lines = try await transcribe(audio)
+            try? FileManager.default.removeItem(at: audio)
+            if lines.isEmpty { status("No se entendió voz; se recorta sin subtítulos…") }
+        }
+
+        status("Creando el video…")
+        let comp = AVMutableComposition()
+        guard let vSrc = try await asset.loadTracks(withMediaType: .video).first,
+              let vDst = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw YTError(message: "No se pudo leer el video.")
+        }
+        try vDst.insertTimeRange(range, of: vSrc, at: .zero)
+        if let aSrc = try await asset.loadTracks(withMediaType: .audio).first,
+           let aDst = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            try aDst.insertTimeRange(range, of: aSrc, at: .zero)
+        }
+        let transform = try await vSrc.load(.preferredTransform)
+        let natural = try await vSrc.load(.naturalSize)
+        vDst.preferredTransform = transform
+
+        guard let export = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetHighestQuality) else {
+            throw YTError(message: "No se pudo preparar la exportación.")
+        }
+        if !lines.isEmpty {
+            let r = natural.applying(transform)
+            let size = CGSize(width: abs(r.width), height: abs(r.height))
+            let vc = AVMutableVideoComposition()
+            vc.renderSize = size
+            vc.frameDuration = CMTime(value: 1, timescale: 30)
+            let instruction = AVMutableVideoCompositionInstruction()
+            instruction.timeRange = CMTimeRange(start: .zero, duration: comp.duration)
+            let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: vDst)
+            layer.setTransform(transform, at: .zero)
+            instruction.layerInstructions = [layer]
+            vc.instructions = [instruction]
+
+            let parent = CALayer(); parent.frame = CGRect(origin: .zero, size: size)
+            let videoLayer = CALayer(); videoLayer.frame = parent.frame
+            parent.addSublayer(videoLayer)
+            let fontSize = size.width * 0.058
+            for line in lines {
+                let text = CATextLayer()
+                text.string = NSAttributedString(string: line.text, attributes: [
+                    .font: UIFont.systemFont(ofSize: fontSize, weight: .heavy),
+                    .foregroundColor: UIColor.white,
+                    .strokeColor: UIColor.black,
+                    .strokeWidth: -3.5,
+                ])
+                text.alignmentMode = .center
+                text.isWrapped = true
+                text.contentsScale = 2
+                text.frame = CGRect(x: size.width * 0.06, y: size.height * 0.16, width: size.width * 0.88, height: fontSize * 2.9)
+                text.opacity = 0
+                let show = CABasicAnimation(keyPath: "opacity")
+                show.fromValue = 1
+                show.toValue = 1
+                show.beginTime = line.start <= 0 ? AVCoreAnimationBeginTimeAtZero : line.start
+                show.duration = max(0.3, line.end - line.start)
+                show.isRemovedOnCompletion = true
+                text.add(show, forKey: "show")
+                parent.addSublayer(text)
+            }
+            vc.animationTool = AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, in: parent)
+            export.videoComposition = vc
+        }
+
+        let out = AppStore.videosDir.appendingPathComponent(UUID().uuidString + ".mp4")
+        export.outputURL = out
+        export.outputFileType = .mp4
+        export.shouldOptimizeForNetworkUse = true
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+            export.exportAsynchronously { c.resume() }
+        }
+        guard export.status == .completed else {
+            throw YTError(message: "No se pudo crear el video: \(export.error?.localizedDescription ?? "error desconocido")")
+        }
+        return out
+    }
+
+    private static func exportAudio(_ asset: AVAsset, range: CMTimeRange) async throws -> URL {
+        guard let ex = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            throw YTError(message: "Este video no tiene audio que se pueda leer.")
+        }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".m4a")
+        ex.outputURL = out
+        ex.outputFileType = .m4a
+        ex.timeRange = range
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in ex.exportAsynchronously { c.resume() } }
+        guard ex.status == .completed else { throw YTError(message: "No se pudo leer el audio del video.") }
+        return out
+    }
+
+    private static func transcribe(_ audio: URL) async throws -> [Line] {
+        let auth = await withCheckedContinuation { (c: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
+            SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) }
+        }
+        guard auth == .authorized else {
+            throw YTError(message: "Activa el reconocimiento de voz para Scheduler en Ajustes del iPhone → Privacidad.")
+        }
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "es-ES")), recognizer.isAvailable else {
+            throw YTError(message: "El reconocimiento de voz en español no está disponible ahora.")
+        }
+        let request = SFSpeechURLRecognitionRequest(url: audio)
+        request.shouldReportPartialResults = false
+        request.addsPunctuation = true
+        let segments: [SFTranscriptionSegment] = try await withCheckedThrowingContinuation { cont in
+            var done = false
+            recognizer.recognitionTask(with: request) { result, error in
+                if done { return }
+                if let result, result.isFinal {
+                    done = true
+                    cont.resume(returning: result.bestTranscription.segments)
+                } else if let error {
+                    done = true
+                    // Sin voz reconocible: se sigue sin subtítulos
+                    if (error as NSError).code == 1110 { cont.resume(returning: []) } else { cont.resume(throwing: error) }
+                }
+            }
+        }
+        // Agrupar en frases cortas (máx. 5 palabras o una pausa)
+        var lines: [Line] = []
+        var words: [String] = []
+        var from = 0.0, to = 0.0
+        for s in segments {
+            if !words.isEmpty && (words.count >= 5 || s.timestamp - to > 0.8) {
+                lines.append(Line(text: words.joined(separator: " "), start: from, end: to + 0.15))
+                words = []
+            }
+            if words.isEmpty { from = s.timestamp }
+            words.append(s.substring)
+            to = s.timestamp + s.duration
+        }
+        if !words.isEmpty { lines.append(Line(text: words.joined(separator: " "), start: from, end: to + 0.3)) }
+        return lines
+    }
+}

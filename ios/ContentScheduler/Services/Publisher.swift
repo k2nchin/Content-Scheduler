@@ -96,14 +96,14 @@ enum Publisher {
             || (p.networks.contains(.instagram) && p.ig?.state != .published)
     }
 
-    static func caption(_ p: Post) -> String { (p.title + "\n\n" + p.tags).trimmingCharacters(in: .whitespacesAndNewlines) }
+    static func caption(_ p: Post, _ n: Network) -> String { (p.text(for: n) + "\n\n" + p.tags).trimmingCharacters(in: .whitespacesAndNewlines) }
 
     static func publishMeta(_ id: UUID, now: Bool, store: AppStore, meta: MetaService) async {
         guard let p = store.post(id), let file = fileURL(p) else { return }
         if p.networks.contains(.facebook), meta.facebookConnected, p.fb?.id == nil {
             store.update(id) { $0.fb = NetInfo(state: .working) }
             do {
-                let vid = try await meta.publishFacebook(file: file, description: caption(p), at: now ? nil : p.date)
+                let vid = try await meta.publishFacebook(file: file, description: caption(p, .facebook), at: now ? nil : p.date)
                 let scheduled = !now && p.date > Date.now.addingTimeInterval(10 * 60)
                 store.update(id) { $0.fb = NetInfo(state: scheduled ? .scheduled : .published, id: vid) }
                 Notifier.send(scheduled ? "Programado en Facebook" : "Publicado en Facebook", p.title)
@@ -127,7 +127,7 @@ enum Publisher {
         guard let p = store.post(id), let file = fileURL(p) else { return }
         store.update(id) { $0.ig = NetInfo(state: .working) }
         do {
-            let mid = try await meta.publishInstagram(file: file, caption: caption(p))
+            let mid = try await meta.publishInstagram(file: file, caption: caption(p, .instagram))
             store.update(id) { $0.ig = NetInfo(state: .published, id: mid) }
             Notifier.send("Publicado en Instagram", p.title)
             store.show("Publicado en Instagram")

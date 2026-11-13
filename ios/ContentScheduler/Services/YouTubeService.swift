@@ -218,12 +218,12 @@ final class YouTubeService: NSObject {
 
     private func metadata(for post: Post, now: Bool) -> [String: Any] {
         let short = post.isVertical && post.duration <= 180
-        var desc = post.title + "\n\n" + post.tags
+        var desc = post.text(for: .youtube) + "\n\n" + post.tags
         if short && !post.tags.lowercased().contains("#shorts") { desc += "\n#Shorts" }
         var status: [String: Any] = ["privacyStatus": now ? "public" : "private", "selfDeclaredMadeForKids": false]
         if !now { status["publishAt"] = ISO8601DateFormatter().string(from: post.date) }
         return [
-            "snippet": ["title": String(post.title.prefix(100)), "description": String(desc.prefix(4900)),
+            "snippet": ["title": String(post.text(for: .youtube).prefix(100)), "description": String(desc.prefix(4900)),
                         "tags": Array(post.tagList.prefix(15)), "categoryId": "10"],
             "status": status,
         ]
@@ -288,6 +288,28 @@ final class YouTubeService: NSObject {
     private(set) var recent: RecentStats?
     var snapshots: [Snapshot] {
         (UserDefaults.standard.data(forKey: "yt.snapshots.\(channel?.id ?? "")").flatMap { try? JSONDecoder().decode([Snapshot].self, from: $0) }) ?? []
+    }
+
+    struct HourStat: Identifiable { let hour: Int; let avgViews: Double; let videos: Int; var id: Int { hour } }
+
+    /// Vistas promedio según la hora (de tu iPhone) en que se publicaron tus últimos 50 videos.
+    func bestHours() async throws -> [HourStat] {
+        guard let ch = channel else { return [] }
+        let c = try await api("GET", "channels?part=contentDetails&id=\(ch.id)")
+        guard let uploads = (((c["items"] as? [[String: Any]])?.first?["contentDetails"] as? [String: Any])?["relatedPlaylists"] as? [String: Any])?["uploads"] as? String else { return [] }
+        let pl = try await api("GET", "playlistItems?part=contentDetails&playlistId=\(uploads)&maxResults=50")
+        let ids = (pl["items"] as? [[String: Any]] ?? []).compactMap { ($0["contentDetails"] as? [String: Any])?["videoId"] as? String }
+        guard !ids.isEmpty else { return [] }
+        let v = try await api("GET", "videos?part=snippet,statistics&id=\(ids.joined(separator: ","))")
+        let iso = ISO8601DateFormatter()
+        var byHour: [Int: [Double]] = [:]
+        for item in v["items"] as? [[String: Any]] ?? [] {
+            guard let pub = (item["snippet"] as? [String: Any])?["publishedAt"] as? String, let date = iso.date(from: pub) else { continue }
+            let views = Double((item["statistics"] as? [String: Any])?["viewCount"] as? String ?? "") ?? 0
+            byHour[Calendar.current.component(.hour, from: date), default: []].append(views)
+        }
+        return byHour.map { HourStat(hour: $0.key, avgViews: $0.value.reduce(0, +) / Double($0.value.count), videos: $0.value.count) }
+            .sorted { $0.avgViews > $1.avgViews }
     }
 
     /// Suma vistas, me gusta y comentarios de los últimos 10 videos y guarda una foto del día.
