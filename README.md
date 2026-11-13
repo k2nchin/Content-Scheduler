@@ -19,7 +19,7 @@ Cada cambio en `ios/` compila la app en GitHub Actions (`.github/workflows/ios.y
 ### Configurar YouTube
 
 1. En Google Cloud (mismo proyecto), activa **YouTube Data API v3**.
-2. **Credenciales → Crear → ID de cliente de OAuth → iOS**, con el bundle id `com.aparataje.contentscheduler`.
+2. **Credenciales → Crear → ID de cliente de OAuth → iOS**, con el bundle id `com.contentscheduler.app`.
 3. Copia el ID en `ios/Config.xcconfig` (`GOOGLE_IOS_CLIENT_ID`) y súbelo; la .ipa se vuelve a compilar sola. No es una clave secreta.
 4. En la pantalla de consentimiento de OAuth agrega el alcance `.../auth/youtube` y tu correo como usuario de prueba.
 

@@ -1,5 +1,5 @@
 // Cliente OAuth de Google de tipo iOS (Google Cloud > Credenciales > Crear > ID de cliente OAuth > iOS,
-// con el bundle id com.aparataje.contentscheduler). No es secreto.
+// con el bundle id com.contentscheduler.app). No es secreto.
 GOOGLE_IOS_CLIENT_ID = 
 // El mismo ID al revés, por ejemplo: com.googleusercontent.apps.1234-abcd
 GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.pendiente
