@@ -59,11 +59,22 @@ struct NetBadge: View {
     var size: CGFloat = 22
     var dimmed = false
     var body: some View {
-        Text(network.short)
-            .font(.system(size: size * 0.45, weight: .bold))
+        Image(network.logo)
+            .resizable().renderingMode(.template).scaledToFit()
+            .frame(width: size * 0.56, height: size * 0.56)
             .foregroundStyle(dimmed ? Theme.muted : (network == .tiktok ? .black : .white))
             .frame(width: size, height: size)
             .background(dimmed ? Theme.bg3 : network.color, in: RoundedRectangle(cornerRadius: size * 0.27))
+            .accessibilityLabel(network.name)
+    }
+}
+
+/// Logo suelto de la red, del color que se le dé.
+struct NetLogo: View {
+    let network: Network
+    var size: CGFloat = 16
+    var body: some View {
+        Image(network.logo).resizable().renderingMode(.template).scaledToFit().frame(width: size, height: size)
     }
 }
 
@@ -265,7 +276,8 @@ struct BoxButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12.5, weight: .bold)).textCase(.uppercase).tracking(1.2)
-            .padding(.horizontal, 14).padding(.vertical, 12)
+            .lineLimit(1).minimumScaleFactor(0.7)
+            .padding(.horizontal, 12).padding(.vertical, 12)
             .foregroundStyle(filled ? .white : (color == Theme.accent ? Theme.fg : color))
             .background(filled ? color : .clear)
             .overlay(Rectangle().strokeBorder(filled ? .clear : (color == Theme.accent ? Theme.fg.opacity(0.85) : color), lineWidth: 1.2))

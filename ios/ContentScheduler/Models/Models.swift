@@ -21,12 +21,14 @@ enum Network: String, Codable, CaseIterable, Identifiable {
     }
     var color: Color {
         switch self {
-        case .facebook: Color(hex: 0x3B82F6)
+        case .facebook: Color(hex: 0x0866FF)
         case .instagram: Color(hex: 0xE1306C)
-        case .youtube: Color(hex: 0xFF3B30)
+        case .youtube: Color(hex: 0xFF0000)
         case .tiktok: Color(hex: 0x25F4EE)
         }
     }
+    /// Logo de la red (Simple Icons, CC0) en Assets.xcassets.
+    var logo: String { "logo-" + rawValue }
     /// Solo YouTube publica de verdad por ahora.
     var isReal: Bool { self == .youtube }
 }

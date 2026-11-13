@@ -25,9 +25,9 @@ struct ContenidoView: View {
             AppHeader()
             PageTitle(kicker: Date.now.formatted(.dateTime.weekday(.wide).day().month(.wide).locale(Locale(identifier: "es"))), title: "Contenido")
             HStack(spacing: 10) {
-                Button { confirmPublish = true } label: { Label("Publicar ahora", systemImage: "bolt") }
+                Button { confirmPublish = true } label: { Label("Publicar ahora", systemImage: "bolt").frame(maxWidth: .infinity) }
                     .buttonStyle(BoxButtonStyle())
-                Button { programarTodo() } label: { Label("Programar todo", systemImage: "paperplane") }
+                Button { programarTodo() } label: { Label("Programar todo", systemImage: "paperplane").frame(maxWidth: .infinity) }
                     .buttonStyle(BoxButtonStyle(filled: true))
             }
             .disabled(working)
@@ -60,9 +60,9 @@ struct ContenidoView: View {
                 }.overlay(Rectangle().strokeBorder(Theme.line))
             }.scrollIndicators(.hidden)
             HStack(spacing: 10) {
-                Button { store.reorganize() } label: { Label("Reorganizar", systemImage: "arrow.triangle.2.circlepath") }
+                Button { store.reorganize() } label: { Label("Reorganizar", systemImage: "arrow.triangle.2.circlepath").frame(maxWidth: .infinity) }
                     .buttonStyle(BoxButtonStyle())
-                Button { confirmClear = true } label: { Label("Borrar cola", systemImage: "trash") }
+                Button { confirmClear = true } label: { Label("Borrar cola", systemImage: "trash").frame(maxWidth: .infinity) }
                     .buttonStyle(BoxButtonStyle(color: Theme.red))
             }.disabled(store.upcoming.isEmpty)
 
@@ -262,7 +262,7 @@ struct QueueCard: View {
             HStack(spacing: 4) {
                 ForEach(Network.allCases.filter { post.networks.contains($0) }) { n in
                     let ok = n == .youtube && post.yt?.videoID != nil
-                    Text(n.name + (ok ? " ✓" : "")).font(.system(size: 10, weight: .medium))
+                    HStack(spacing: 3) { NetLogo(network: n, size: 10); Text(ok ? "✓" : "") }.font(.system(size: 10, weight: .bold))
                         .foregroundStyle(ok ? Theme.ok : Theme.muted)
                         .padding(.horizontal, 6).padding(.vertical, 3)
                         .background((ok ? Theme.ok : Theme.muted).opacity(0.12), in: Capsule())

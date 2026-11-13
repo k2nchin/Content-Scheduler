@@ -42,7 +42,7 @@ struct MetricaView: View {
                 HStack(spacing: 0) {
                     ForEach(Network.allCases) { n in
                         Button { network = n } label: {
-                            Label(n.name, systemImage: icon(n)).font(.footnote)
+                            HStack(spacing: 7) { NetLogo(network: n, size: 15); Text(n.name) }.font(.footnote)
                                 .padding(.horizontal, 14).padding(.vertical, 11)
                                 .foregroundStyle(network == n ? .white : Theme.muted)
                                 .background(network == n ? Theme.accent : Theme.bg2)
@@ -176,9 +176,6 @@ struct MetricaView: View {
             .foregroundStyle(on ? .white : Theme.muted).background(on ? Theme.accent : Theme.bg2)
     }
 
-    private func icon(_ n: Network) -> String {
-        switch n { case .facebook: "f.square"; case .youtube: "play.rectangle"; case .instagram: "camera"; case .tiktok: "music.note" }
-    }
 
     private var report: String {
         var lines = ["Reporte Content Scheduler · \(Date.now.formatted(date: .long, time: .omitted))"]
