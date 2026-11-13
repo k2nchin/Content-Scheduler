@@ -22,6 +22,20 @@ struct SettingsView: View {
                             detail: youtube.channel.map { "Canal: \($0.title)" } ?? (connecting ? "Conectando…" : "Toca para conectar tu canal"),
                             on: youtube.isConnected)
                     }.buttonStyle(.plain)
+                    if youtube.isConnected {
+                        Divider().overlay(Theme.line)
+                        NavigationLink { CommentsView() } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "bubble.left.and.bubble.right.fill").foregroundStyle(Theme.accent).frame(width: 32)
+                            VStack(alignment: .leading) {
+                                Text("Comentarios de YouTube").bold()
+                                Text("Responder y respuestas automáticas").font(.caption).foregroundStyle(Theme.muted)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
+                        }.contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                    }
                     ForEach([Network.facebook, .instagram, .tiktok]) { n in
                         Divider().overlay(Theme.line)
                         Toggle(isOn: Binding(get: { store.state.demoAccounts[n] ?? false }, set: { store.state.demoAccounts[n] = $0 })) {

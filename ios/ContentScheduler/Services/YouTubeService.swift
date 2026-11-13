@@ -27,7 +27,7 @@ final class YouTubeService: NSObject {
 
     private var accessToken: String?
     private var tokenExpiry = Date.distantPast
-    private let scope = "https://www.googleapis.com/auth/youtube"
+    private let scope = "https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.force-ssl"
     private var authSession: ASWebAuthenticationSession?
 
     private var clientID: String { (Bundle.main.object(forInfoDictionaryKey: "GoogleClientID") as? String ?? "").trimmingCharacters(in: .whitespaces) }
@@ -149,6 +149,9 @@ final class YouTubeService: NSObject {
         case (_, "quotaExceeded"): return YTError(message: "Se acabó la cuota diaria de YouTube. Se puede volver a subir mañana.")
         case (_, "uploadLimitExceeded"): return YTError(message: "YouTube no deja subir más videos hoy en este canal.")
         case (_, "youtubeSignupRequired"): return YTError(message: "Esta cuenta de Google no tiene canal de YouTube.")
+        case (403, "insufficientPermissions"), (403, "ACCESS_TOKEN_SCOPE_INSUFFICIENT"):
+            return YTError(message: "Falta el permiso de comentarios. Desconecta y vuelve a conectar YouTube en Ajustes.")
+        case (_, "commentsDisabled"): return YTError(message: "Ese video tiene los comentarios desactivados.")
         case (_, "invalidPublishAt"): return YTError(message: "YouTube no aceptó esa hora. Elige una hora futura.")
         default:
             if status == 403 && msg.contains("has not been used") { return YTError(message: "La API de YouTube no está activada en Google Cloud.") }
@@ -233,6 +236,47 @@ final class YouTubeService: NSObject {
 
     func delete(videoID: String) async throws {
         _ = try await api("DELETE", "videos?id=\(videoID)")
+    }
+
+    // MARK: Comentarios
+
+    struct Comment: Identifiable, Hashable {
+        let id: String          // id del hilo
+        let commentID: String   // id del comentario principal (para responder)
+        let videoID: String
+        let author: String
+        let text: String
+        let date: Date
+        var replied: Bool
+    }
+
+    /// Últimos comentarios de los videos del canal.
+    func comments() async throws -> [Comment] {
+        guard let ch = channel else { throw YTError(message: "Conecta YouTube en Ajustes.") }
+        let json = try await api("GET", "commentThreads?part=snippet,replies&allThreadsRelatedToChannelId=\(ch.id)&maxResults=50&order=time&textFormat=plainText")
+        let iso = ISO8601DateFormatter()
+        return (json["items"] as? [[String: Any]] ?? []).compactMap { item in
+            guard let id = item["id"] as? String,
+                  let thread = item["snippet"] as? [String: Any],
+                  let top = thread["topLevelComment"] as? [String: Any],
+                  let cid = top["id"] as? String,
+                  let sn = top["snippet"] as? [String: Any] else { return nil }
+            let author = (sn["authorChannelId"] as? [String: Any])?["value"] as? String
+            if author == ch.id { return nil } // comentarios del propio canal
+            let replies = ((item["replies"] as? [String: Any])?["comments"] as? [[String: Any]]) ?? []
+            let mine = replies.contains { r in
+                (((r["snippet"] as? [String: Any])?["authorChannelId"] as? [String: Any])?["value"] as? String) == ch.id
+            }
+            return Comment(id: id, commentID: cid, videoID: thread["videoId"] as? String ?? "",
+                           author: sn["authorDisplayName"] as? String ?? "Alguien",
+                           text: sn["textDisplay"] as? String ?? "",
+                           date: iso.date(from: sn["publishedAt"] as? String ?? "") ?? .now,
+                           replied: mine)
+        }
+    }
+
+    func reply(to commentID: String, text: String) async throws {
+        _ = try await api("POST", "comments?part=snippet", body: ["snippet": ["parentId": commentID, "textOriginal": text]])
     }
 
     struct VideoState { let isPublic: Bool; let failed: String?; let views: Int; let likes: Int }

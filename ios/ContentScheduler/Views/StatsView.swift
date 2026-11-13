@@ -132,6 +132,17 @@ struct StatsView: View {
                 }
             }
             Text("Actualizado \(ch.checked.dayLabel.lowercased()) a las \(ch.checked.hm)").font(.caption).foregroundStyle(Theme.muted)
+            Card { NavigationLink { CommentsView() } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "bubble.left.and.bubble.right.fill").foregroundStyle(Theme.accent).frame(width: 32)
+                    VStack(alignment: .leading) {
+                        Text("Comentarios de YouTube").bold()
+                        Text("Responder y respuestas automáticas").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain) }
         } else {
             Card {
                 HStack(spacing: 12) {
