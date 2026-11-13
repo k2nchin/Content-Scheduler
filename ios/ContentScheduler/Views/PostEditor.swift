@@ -47,13 +47,13 @@ struct PostEditor: View {
                                 if on { networks.remove(n) } else { networks.insert(n) }
                             } label: {
                                 VStack(spacing: 6) {
-                                    NetBadge(network: n)
-                                    Text(n.name).font(.system(size: 11)).foregroundStyle(on ? Theme.fg : Theme.muted)
+                                    NetBadge(network: n, dimmed: !n.isReal)
+                                    Text(n.isReal ? n.name : "Pronto").font(.system(size: 11)).foregroundStyle(on ? Theme.fg : Theme.muted)
                                 }
                                 .frame(maxWidth: .infinity).padding(.vertical, 10)
                                 .background(on ? Theme.bg3 : .clear, in: RoundedRectangle(cornerRadius: 10))
                                 .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(on ? Theme.fg : Theme.line))
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(.plain).disabled(!n.isReal)
                         }
                     }
 
@@ -64,12 +64,12 @@ struct PostEditor: View {
                         .padding(.top, 6)
 
                     let uploading = post.yt?.state == .uploading
-                    HStack(spacing: 10) {
-                        Button { approval(post) } label: { Label("Aprobación", systemImage: "link") }
+                    if networks.contains(.youtube) && youtube.isConnected && post.yt?.state != .published
+                        && (post.yt?.videoID != nil || Publisher.fileURL(post) != nil) {
+                        Button { publishNow(post) } label: { Label("Publicar ya en YouTube", systemImage: "paperplane") }
                             .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.fg))
-                        Button { publishNow(post) } label: { Label("Publicar ya", systemImage: "paperplane") }
-                            .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.fg))
-                    }.padding(.top, 12).disabled(uploading || busy)
+                            .padding(.top, 12).disabled(uploading || busy)
+                    }
                     Button { save(post) } label: { Text(saveLabel(post)) }
                         .buttonStyle(PrimaryButtonStyle()).disabled(uploading || busy)
                     Button(role: .destructive) { confirmDelete = true } label: { Label("Eliminar", systemImage: "trash") }
@@ -184,19 +184,8 @@ struct PostEditor: View {
     private func publishNow(_ current: Post) {
         guard write() != nil else { return }
         dismiss()
-        if networks.contains(.youtube), youtube.isConnected {
-            if current.yt?.videoID != nil { Task { await Publisher.update(postID, now: true, store: store, yt: youtube) }; return }
-            if Publisher.fileURL(current) != nil { Task { await Publisher.upload(postID, now: true, store: store, yt: youtube) }; return }
-        }
-        store.update(postID) { $0.status = .published; $0.date = .now; $0.errorMessage = nil }
-        store.show("Marcado como publicado (otras redes: modo prueba)")
-    }
-
-    private func approval(_ current: Post) {
-        _ = write()
-        store.update(postID) { $0.status = .approval }
-        UIPasteboard.general.string = "Revisa este post: \(title)\n\(tags)\n\(date.dayLabel) a las \(date.hm)"
-        store.show("Resumen copiado para enviarlo a tu cliente")
+        if current.yt?.videoID != nil { Task { await Publisher.update(postID, now: true, store: store, yt: youtube) } }
+        else { Task { await Publisher.upload(postID, now: true, store: store, yt: youtube) } }
     }
 
     private func attach(_ item: PhotosPickerItem?) {

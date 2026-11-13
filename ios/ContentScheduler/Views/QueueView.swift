@@ -17,10 +17,9 @@ struct QueueView: View {
                 let errors = up.filter { $0.status == .error }.count
                 ScreenTitle(solid: "Tu", outline: "cola",
                             subtitle: "\(today) \(today == 1 ? "publicación" : "publicaciones") hoy" + (errors > 0 ? " · \(errors) con error" : ""))
-                DemoBanner(text: youtube.isConnected
-                           ? "YouTube publica de verdad. Facebook, Instagram y TikTok todavía son de prueba."
-                           : "Conecta YouTube en Ajustes para publicar de verdad. Las demás redes todavía son de prueba.",
-                           icon: "flask")
+                if !youtube.isConnected {
+                    DemoBanner(text: "Conecta YouTube en Ajustes para publicar. Facebook, Instagram y TikTok llegarán más adelante.", icon: "info.circle")
+                }
                 filters(up)
                 let list = filter.map { f in up.filter { $0.status == f } } ?? up
                 if importing { ProgressView("Preparando video…").frame(maxWidth: .infinity).padding() }
@@ -58,7 +57,6 @@ struct QueueView: View {
             HStack(spacing: 8) {
                 chip("Todo · \(up.count)", nil)
                 chip("Programados", .scheduled)
-                chip("En aprobación", .approval)
                 chip("Con error", .error)
             }
         }.scrollIndicators(.hidden)

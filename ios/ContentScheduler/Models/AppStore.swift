@@ -64,9 +64,7 @@ final class AppStore {
     }
 
     func defaultNetworks(youtubeConnected: Bool) -> Set<Network> {
-        var set = Set(Network.allCases.filter { !$0.isReal && (state.demoAccounts[$0] ?? false) })
-        if youtubeConnected { set.insert(.youtube) }
-        return set
+        youtubeConnected ? [.youtube] : []
     }
 
     /// Copia el video a la app, lee duración, orientación y miniatura, y crea el post.
@@ -120,20 +118,4 @@ final class AppStore {
         show("De vuelta en la cola con hashtags nuevos")
     }
 
-    func loadDemo() {
-        let titles = ["Cuando el chat pide otra canción 😂", "Reacción épica al final del en vivo", "El momento que nadie esperaba",
-                      "“No me lo creo” — clip del live", "Respuesta a los haters 🔥", "Ensayo detrás de cámaras", "Así suena en vivo", "Meme del día: el error del micro"]
-        var posts: [Post] = []
-        for (i, t) in titles.enumerated() {
-            let date = Date.now.addingTimeInterval(Double(i - 2) * 47_000 + Double(i % 3) * 10_800)
-            var nets: Set<Network> = [.instagram, .tiktok]
-            if i % 2 == 0 { nets.insert(.facebook) }
-            var p = Post(title: t, tags: ["#musica #envivo", "#viral #meme", "#reels #latino"][i % 3], networks: nets, date: date,
-                         duration: 15 + (i * 7) % 45, gradient: i % Theme.gradients.count)
-            p.status = date < .now ? (i == 1 ? .error : .published) : (i == 4 ? .approval : .scheduled)
-            if i == 1 { p.errorMessage = "TikTok: la sesión expiró. Vuelve a conectar la cuenta." }
-            posts.append(p)
-        }
-        state.posts = posts
-    }
 }
