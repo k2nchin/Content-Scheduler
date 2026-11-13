@@ -29,7 +29,7 @@ struct RootView: View {
             QueueView().tabItem { Label("Cola", systemImage: "list.bullet.rectangle") }
             CalendarView().tabItem { Label("Calendario", systemImage: "calendar") }
             StatsView().tabItem { Label("Stats", systemImage: "chart.bar.fill") }
-            ClipsView().tabItem { Label("Reciclar", systemImage: "arrow.triangle.2.circlepath") }
+            ClipsView().tabItem { Label("Clips IA", systemImage: "sparkles") }
             SettingsView().tabItem { Label("Ajustes", systemImage: "gearshape") }
         }
         .overlay(alignment: .bottom) {

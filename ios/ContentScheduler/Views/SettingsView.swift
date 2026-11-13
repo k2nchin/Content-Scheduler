@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var newSlot = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: .now) ?? .now
     @State private var connecting = false
     @State private var confirmDisconnect = false
+    @State private var confirmDemo = false
 
     var body: some View {
         @Bindable var store = store
@@ -23,11 +24,13 @@ struct SettingsView: View {
                     }.buttonStyle(.plain)
                     ForEach([Network.facebook, .instagram, .tiktok]) { n in
                         Divider().overlay(Theme.line)
-                        HStack(spacing: 12) {
-                            NetBadge(network: n, size: 32, dimmed: true)
-                            VStack(alignment: .leading) {
-                                Text(n.name).bold().foregroundStyle(Theme.muted)
-                                Text("Próximamente").font(.caption).foregroundStyle(Theme.muted)
+                        Toggle(isOn: Binding(get: { store.state.demoAccounts[n] ?? false }, set: { store.state.demoAccounts[n] = $0 })) {
+                            HStack(spacing: 12) {
+                                NetBadge(network: n, size: 32)
+                                VStack(alignment: .leading) {
+                                    Text(n.name).bold()
+                                    Text("Modo prueba · aún no publica").font(.caption).foregroundStyle(Theme.muted)
+                                }
                             }
                         }
                     }
@@ -49,10 +52,29 @@ struct SettingsView: View {
                     }
                 }
 
+                SectionLabel(text: "Avisos por Telegram")
+                Card {
+                    Toggle(isOn: $store.state.telegram) { labeled("Avisos activos", "Qué se programó y qué falló") }
+                    Divider().overlay(Theme.line)
+                    Toggle(isOn: $store.state.viralAlert) { labeled("Video viral", "Cuando un video se dispara") }
+                    Divider().overlay(Theme.line)
+                    Toggle(isOn: $store.state.weeklyReport) { labeled("Reporte del lunes", "Resumen de tu semana") }
+                    Text("Todavía no se envían: falta conectar tu bot de Telegram.").font(.caption).foregroundStyle(Theme.muted)
+                }
+
+                SectionLabel(text: "Datos")
+                Card {
+                    Button { confirmDemo = true } label: {
+                        labeled("Cargar datos de ejemplo", "Reemplaza tu cola por publicaciones de prueba")
+                    }.buttonStyle(.plain)
+                }
                 Text("CONTENT SCHEDULER · iOS").font(Theme.mono).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 20)
             }
             .confirmationDialog("¿Desconectar YouTube?", isPresented: $confirmDisconnect, titleVisibility: .visible) {
                 Button("Desconectar", role: .destructive) { youtube.disconnect(); store.show("YouTube desconectado") }
+            }
+            .confirmationDialog("¿Cargar los datos de ejemplo? Se reemplaza tu cola actual.", isPresented: $confirmDemo, titleVisibility: .visible) {
+                Button("Cargar ejemplo", role: .destructive) { store.loadDemo() }
             }
         }
     }
