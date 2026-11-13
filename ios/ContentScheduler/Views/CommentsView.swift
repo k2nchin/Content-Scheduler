@@ -103,7 +103,7 @@ struct CommentsView: View {
     private func stat(_ title: String, _ n: Int) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title).font(.caption).foregroundStyle(Theme.muted)
-            Text("\(n)").font(Theme.display(30)).foregroundStyle(Theme.fg)
+            Text("\(n)").font(Theme.display(26)).foregroundStyle(Theme.fg)
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))

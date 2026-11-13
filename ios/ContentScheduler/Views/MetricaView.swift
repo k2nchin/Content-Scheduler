@@ -38,25 +38,26 @@ struct MetricaView: View {
             }
             Divider().overlay(Theme.line).padding(.vertical, 6)
 
-            ScrollView(.horizontal) {
-                HStack(spacing: 0) {
-                    ForEach(Network.allCases) { n in
-                        Button { network = n } label: {
-                            HStack(spacing: 7) { NetLogo(network: n, size: 15); Text(n.name) }.font(.footnote)
-                                .padding(.horizontal, 14).padding(.vertical, 11)
-                                .foregroundStyle(network == n ? .white : Theme.muted)
-                                .background(network == n ? Theme.accent : Theme.bg2)
-                        }.buttonStyle(.plain)
-                    }
-                }.overlay(Rectangle().strokeBorder(Theme.line))
-            }.scrollIndicators(.hidden)
+            HStack(spacing: 0) {
+                ForEach(Network.allCases) { n in
+                    Button { network = n } label: {
+                        VStack(spacing: 5) {
+                            NetLogo(network: n, size: 18)
+                            Text(n.name).font(.system(size: 11, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        .foregroundStyle(network == n ? .white : Theme.muted)
+                        .background(network == n ? Theme.accent : Theme.bg2)
+                    }.buttonStyle(.plain)
+                }
+            }.overlay(Rectangle().strokeBorder(Theme.line))
 
-            HStack(spacing: 14) {
-                HStack(spacing: 0) {
-                    seg("Detalle", !compare) { compare = false }
-                    seg("Comparar", compare) { compare = true }
-                }.overlay(Rectangle().strokeBorder(Theme.line))
-                Toggle("Auto cada 3 min", isOn: $auto).font(.footnote).fixedSize()
+            HStack(spacing: 0) {
+                seg("Detalle", !compare) { compare = false }.frame(maxWidth: .infinity)
+                seg("Comparar", compare) { compare = true }.frame(maxWidth: .infinity)
+            }.overlay(Rectangle().strokeBorder(Theme.line))
+            Toggle(isOn: $auto) {
+                Label("Actualizar solo cada 3 min", systemImage: "clock.arrow.2.circlepath").font(.footnote)
             }
 
             if compare { compareView } else { detailView }
@@ -77,11 +78,9 @@ struct MetricaView: View {
         let r = connected ? youtube.recent : nil
         VStack(spacing: 0) {
             HStack(spacing: 14) {
-                Image(systemName: "person").font(.title3).foregroundStyle(Theme.muted)
-                    .frame(width: 64, height: 64).background(Theme.bg3, in: Circle())
-                    .overlay(Circle().strokeBorder(Theme.accent.opacity(0.25), lineWidth: 3))
+                NetBadge(network: network, size: 52, dimmed: !connected)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(ch?.title ?? "Sin cuenta").font(.title3)
+                    Text(ch?.title ?? "Sin cuenta").font(.title3).lineLimit(1)
                     Text(network.isReal ? network.name : "\(network.name) · próximamente").font(.footnote).foregroundStyle(Theme.muted)
                 }
                 Spacer()
@@ -164,15 +163,16 @@ struct MetricaView: View {
     private func cell(_ title: String, _ value: String?, _ note: String?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.footnote).foregroundStyle(Theme.muted)
-            Text(value ?? "–").font(value == nil ? .title2.bold() : Theme.display(30)).foregroundStyle(value == nil ? Theme.accent : Theme.fg)
+            Text(value ?? "–").font(value == nil ? .title2.bold() : Theme.display(28)).lineLimit(1).minimumScaleFactor(0.6).foregroundStyle(value == nil ? Theme.accent : Theme.fg)
             if let note { Text(note).font(.caption).foregroundStyle(Theme.muted) }
         }
-        .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func seg(_ text: String, _ on: Bool, _ action: @escaping () -> Void) -> some View {
         Button(text, action: action)
             .font(.footnote).padding(.horizontal, 14).padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
             .foregroundStyle(on ? .white : Theme.muted).background(on ? Theme.accent : Theme.bg2)
     }
 

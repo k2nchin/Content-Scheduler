@@ -31,9 +31,7 @@ struct ContenidoView: View {
                     .buttonStyle(BoxButtonStyle(filled: true))
             }
             .disabled(working)
-            Divider().overlay(Theme.line).padding(.vertical, 6)
-
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 counter("Por programar", store.porProgramar.count, "square.stack.3d.up")
                 counter("Programados", store.programados.count, "calendar.badge.checkmark")
                 counter("Por revisar", store.porRevisar.count, "exclamationmark.circle", warn: true)
@@ -44,21 +42,20 @@ struct ContenidoView: View {
             addBox
 
             HStack {
-                Text("EN COLA").font(Theme.display(30)).foregroundStyle(Theme.fg)
+                Text("EN COLA").font(Theme.display(26)).foregroundStyle(Theme.fg)
                 Spacer()
                 Button { grid.toggle() } label: { Image(systemName: grid ? "list.bullet" : "square.grid.2x2").padding(10) }
                     .overlay(Rectangle().strokeBorder(Theme.line)).foregroundStyle(Theme.fg)
             }.padding(.top, 14)
-            ScrollView(.horizontal) {
-                HStack(spacing: 0) {
-                    ForEach(Filter.allCases, id: \.self) { f in
-                        Button(f.rawValue) { filter = f }
-                            .font(.footnote).padding(.horizontal, 14).padding(.vertical, 10)
-                            .foregroundStyle(filter == f ? .white : Theme.muted)
-                            .background(filter == f ? Theme.accent : Theme.bg2)
-                    }
-                }.overlay(Rectangle().strokeBorder(Theme.line))
-            }.scrollIndicators(.hidden)
+            HStack(spacing: 0) {
+                ForEach(Filter.allCases, id: \.self) { f in
+                    Button(f.rawValue) { filter = f }
+                        .font(.system(size: 12)).lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        .foregroundStyle(filter == f ? .white : Theme.muted)
+                        .background(filter == f ? Theme.accent : Theme.bg2)
+                }
+            }.overlay(Rectangle().strokeBorder(Theme.line))
             HStack(spacing: 10) {
                 Button { store.reorganize() } label: { Label("Reorganizar", systemImage: "arrow.triangle.2.circlepath").frame(maxWidth: .infinity) }
                     .buttonStyle(BoxButtonStyle())
@@ -105,11 +102,11 @@ struct ContenidoView: View {
     private func counter(_ title: String, _ n: Int, _ icon: String, warn: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top) {
-                Text(title).font(.caption).foregroundStyle(Theme.muted).lineLimit(2)
+                Text(title).font(.caption2).foregroundStyle(Theme.muted).lineLimit(2).minimumScaleFactor(0.85)
                 Spacer(minLength: 2)
                 Image(systemName: icon).font(.caption).foregroundStyle(warn ? Theme.warn : Theme.muted)
             }
-            Text("\(n)").font(Theme.display(34)).foregroundStyle(Theme.fg)
+            Text("\(n)").font(Theme.display(30)).foregroundStyle(Theme.fg)
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
@@ -172,7 +169,7 @@ struct ContenidoView: View {
                                 }.simultaneousGesture(TapGesture().onEnded { slotTime = t })
                             }
                         }
-                        .frame(height: 110).frame(maxWidth: .infinity)
+                        .frame(height: 92).frame(maxWidth: .infinity)
                         .overlay(Rectangle().strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [3])))
                         Text(t.formatted(.dateTime.hour().minute())).font(.subheadline)
                         Text(t < .now && post == nil ? "Pasó" : post == nil ? "Libre" : store.isScheduled(post!) ? "Programado" : "Por programar")
@@ -247,7 +244,7 @@ struct QueueCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .topLeading) {
-                Thumb(post: post, width: 160).frame(maxWidth: .infinity).frame(height: 150).clipped()
+                Thumb(post: post, width: 160).frame(maxWidth: .infinity).frame(height: 130).clipped()
                 Text(post.date.formatted(.dateTime.weekday(.abbreviated).day().hour().minute().locale(Locale(identifier: "es"))))
                     .font(.caption2.bold()).padding(.horizontal, 7).padding(.vertical, 4)
                     .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 5)).padding(6)

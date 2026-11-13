@@ -176,8 +176,8 @@ struct Screen<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) { content }
-                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 40)
+            VStack(alignment: .leading, spacing: 14) { content }
+                .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 32)
         }
         .scrollIndicators(.hidden)
         .background(Theme.bg.ignoresSafeArea())
@@ -188,21 +188,18 @@ struct Screen<Content: View>: View {
 
 struct AppHeader: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Image(systemName: "play.fill").font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
-                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 6))
-                    .shadow(color: Theme.accent.opacity(0.5), radius: 12)
-                Text("CONTENT SCHEDULER").font(Theme.display(22)).tracking(1).foregroundStyle(Theme.fg)
-                Spacer()
+        HStack(spacing: 10) {
+            Image(systemName: "play.fill").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(Theme.accent, in: RoundedRectangle(cornerRadius: 7))
+                .shadow(color: Theme.accent.opacity(0.45), radius: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("CONTENT SCHEDULER").font(Theme.display(17)).tracking(0.8).foregroundStyle(Theme.fg)
+                Text("ESTUDIO DE PUBLICACIÓN").font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1.5).foregroundStyle(Theme.muted)
             }
-            HStack(spacing: 8) {
-                Image(systemName: "rectangle.split.2x1").font(.caption).foregroundStyle(Theme.muted)
-                Text("TU ESPACIO  /  ESTUDIO DE PUBLICACIÓN").font(Theme.mono).tracking(2).foregroundStyle(Theme.muted)
-            }
-            Divider().overlay(Theme.line)
+            Spacer()
         }
+        .padding(.bottom, 4)
     }
 }
 
@@ -213,13 +210,14 @@ struct PageTitle: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Circle().fill(Theme.accent).frame(width: 7, height: 7)
-                Text(kicker.uppercased()).font(.system(size: 13, weight: .medium, design: .monospaced)).tracking(3).foregroundStyle(Theme.accent)
+                Text(kicker.uppercased()).font(.system(size: 11, weight: .medium, design: .monospaced)).tracking(2).foregroundStyle(Theme.accent).lineLimit(1)
             }
             (Text(title.uppercased()).foregroundStyle(Theme.fg) + Text(".").foregroundStyle(Theme.accent))
-                .font(Theme.display(56))
+                .font(Theme.display(42))
+                .lineLimit(1).minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 10)
+        .padding(.top, 6).padding(.bottom, 2)
     }
 }
 
