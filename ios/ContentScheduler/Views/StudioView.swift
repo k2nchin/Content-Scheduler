@@ -207,9 +207,10 @@ struct StudioView: View {
 
 @MainActor
 enum StudioExport {
-    struct Line { let text: String; let start: Double; let end: Double }
+    struct Word { let text: String; let start: Double; let end: Double }
+    struct Line { let text: String; let start: Double; let end: Double; var words: [Word] = [] }
 
-    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, track: Bool = true, hook: String? = nil, style: SubStyle = .clasico, status: @escaping (String) -> Void) async throws -> URL {
+    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, track: Bool = true, hook: String? = nil, style: SubStyle = .viral, status: @escaping (String) -> Void) async throws -> URL {
         var source = source
         var start = start, end = end
         if vertical {
@@ -271,24 +272,43 @@ enum StudioExport {
             let parent = CALayer(); parent.frame = CGRect(origin: .zero, size: size)
             let videoLayer = CALayer(); videoLayer.frame = parent.frame
             parent.addSublayer(videoLayer)
-            let fontSize = size.width * 0.058
+            let fontSize = size.width * style.sizeFactor
             for line in lines {
-                let text = CATextLayer()
-                text.string = NSAttributedString(string: style.uppercase ? line.text.uppercased() : line.text, attributes: style.attributes(fontSize))
-                if let box = style.box { text.backgroundColor = box.cgColor; text.cornerRadius = fontSize * 0.3 }
-                text.alignmentMode = .center
-                text.isWrapped = true
-                text.contentsScale = 2
-                text.frame = CGRect(x: size.width * 0.06, y: size.height * 0.16, width: size.width * 0.88, height: fontSize * 2.9)
-                text.opacity = 0
-                let show = CABasicAnimation(keyPath: "opacity")
-                show.fromValue = 1
-                show.toValue = 1
-                show.beginTime = line.start <= 0 ? AVCoreAnimationBeginTimeAtZero : line.start
-                show.duration = max(0.3, line.end - line.start)
-                show.isRemovedOnCompletion = true
-                text.add(show, forKey: "show")
-                parent.addSublayer(text)
+                // Con tiempos por palabra: una capa por palabra con esa palabra resaltada (como CapCut).
+                // Sin tiempos (o estilo sin resaltado): una sola capa para toda la frase.
+                let steps: [(start: Double, end: Double, hi: Int?)] = (style.highlight != nil && !line.words.isEmpty)
+                    ? line.words.enumerated().map { i, w in
+                        (w.start, i + 1 < line.words.count ? line.words[i + 1].start : line.end, i) }
+                    : [(line.start, line.end, nil)]
+                for (k, st) in steps.enumerated() {
+                    let text = CATextLayer()
+                    text.string = style.attributed(line.words.isEmpty ? [line.text] : line.words.map(\.text), highlight: st.hi, size: fontSize)
+                    if let box = style.box { text.backgroundColor = box.cgColor; text.cornerRadius = fontSize * 0.28 }
+                    text.alignmentMode = .center
+                    text.isWrapped = true
+                    text.contentsScale = 2
+                    text.frame = CGRect(x: size.width * 0.06, y: size.height * 0.2, width: size.width * 0.88, height: fontSize * 2.8)
+                    text.opacity = 0
+                    let begin = st.start <= 0 ? AVCoreAnimationBeginTimeAtZero : st.start
+                    let show = CABasicAnimation(keyPath: "opacity")
+                    show.fromValue = 1
+                    show.toValue = 1
+                    show.beginTime = begin
+                    show.duration = max(0.08, st.end - st.start)
+                    show.isRemovedOnCompletion = true
+                    text.add(show, forKey: "show")
+                    if style.pop && (k == 0 || st.hi != nil) {
+                        // Pequeño «pop» al aparecer, como los subtítulos virales
+                        let pop = CAKeyframeAnimation(keyPath: "transform.scale")
+                        pop.values = k == 0 ? [0.8, 1.08, 1.0] : [0.96, 1.03, 1.0]
+                        pop.keyTimes = [0, 0.6, 1]
+                        pop.duration = 0.16
+                        pop.beginTime = begin
+                        pop.isRemovedOnCompletion = true
+                        text.add(pop, forKey: "pop")
+                    }
+                    parent.addSublayer(text)
+                }
             }
             if let wmLayer { parent.addSublayer(wmLayer) }
             if !hookText.isEmpty {
@@ -405,20 +425,21 @@ enum StudioExport {
                 }
             }
         }
-        // Agrupar en frases cortas (máx. 5 palabras o una pausa)
+        // Agrupar en frases cortas estilo CapCut (máx. 4 palabras o una pausa), guardando el tiempo de cada palabra
         var lines: [Line] = []
-        var words: [String] = []
-        var from = 0.0, to = 0.0
+        var words: [Word] = []
+        var to = 0.0
+        func flush(_ tail: Double) {
+            guard let first = words.first else { return }
+            lines.append(Line(text: words.map(\.text).joined(separator: " "), start: first.start, end: to + tail, words: words))
+            words = []
+        }
         for s in segments {
-            if !words.isEmpty && (words.count >= 5 || s.timestamp - to > 0.8) {
-                lines.append(Line(text: words.joined(separator: " "), start: from, end: to + 0.15))
-                words = []
-            }
-            if words.isEmpty { from = s.timestamp }
-            words.append(s.substring)
+            if !words.isEmpty && (words.count >= 4 || s.timestamp - to > 0.7) { flush(0.12) }
+            words.append(Word(text: s.substring, start: s.timestamp, end: s.timestamp + s.duration))
             to = s.timestamp + s.duration
         }
-        if !words.isEmpty { lines.append(Line(text: words.joined(separator: " "), start: from, end: to + 0.3)) }
+        flush(0.3)
         return lines
     }
 }
@@ -445,31 +466,68 @@ struct ReframePicker: View {
 }
 
 
-/// Estilos de subtítulos para los clips.
+/// Estilos de subtítulos tipo CapCut: fuentes gruesas, borde fuerte y la palabra que se dice resaltada.
 enum SubStyle: String, CaseIterable, Hashable {
-    case clasico, amarillo, rosa, caja
+    case viral, verde, rosa, comic, bebas, poppins, clasico, caja
+
     var sample: String {
-        switch self { case .clasico: "Clásico"; case .amarillo: "AMARILLO"; case .rosa: "Rosa CS"; case .caja: "Caja negra" }
-    }
-    var uppercase: Bool { self == .amarillo }
-    var textColor: Color { self == .amarillo ? .yellow : .white }
-    var boxColor: Color {
-        switch self { case .rosa: Theme.accent; case .caja: .black.opacity(0.75); default: .clear }
-    }
-    var box: UIColor? {
         switch self {
-        case .rosa: UIColor(red: 1, green: 0.04, blue: 0.54, alpha: 0.95)
-        case .caja: UIColor.black.withAlphaComponent(0.7)
-        default: nil
+        case .viral: "VIRAL"; case .verde: "VERDE"; case .rosa: "ROSA CS"; case .comic: "CÓMIC"
+        case .bebas: "BEBAS"; case .poppins: "Poppins"; case .clasico: "Clásico"; case .caja: "Caja"
         }
     }
-    func attributes(_ size: CGFloat) -> [NSAttributedString.Key: Any] {
-        var a: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: size, weight: .heavy)]
+    /// Fuente incluida en la app (nombre PostScript).
+    var fontName: String? {
         switch self {
-        case .clasico: a[.foregroundColor] = UIColor.white; a[.strokeColor] = UIColor.black; a[.strokeWidth] = -3.5
-        case .amarillo: a[.foregroundColor] = UIColor.yellow; a[.strokeColor] = UIColor.black; a[.strokeWidth] = -4.0
-        case .rosa, .caja: a[.foregroundColor] = UIColor.white
+        case .viral: "ArchivoBlack-Regular"; case .verde: "Anton-Regular"; case .rosa: "Poppins-Black"
+        case .comic: "LuckiestGuy-Regular"; case .bebas: "BebasNeue-Regular"; case .poppins: "Poppins-ExtraBold"
+        case .clasico, .caja: nil
         }
-        return a
     }
+    var uppercase: Bool { self != .poppins && self != .clasico && self != .caja }
+    var sizeFactor: CGFloat {
+        switch self { case .verde, .bebas: 0.082; case .comic: 0.07; default: 0.064 }
+    }
+    var base: UIColor { self == .comic ? UIColor(red: 1, green: 0.9, blue: 0.1, alpha: 1) : .white }
+    /// Color de la palabra que se está diciendo (nil = sin resaltado).
+    var highlight: UIColor? {
+        switch self {
+        case .viral: UIColor(red: 1, green: 0.9, blue: 0.0, alpha: 1)
+        case .verde: UIColor(red: 0.24, green: 1, blue: 0.42, alpha: 1)
+        case .rosa: UIColor(red: 1, green: 0.04, blue: 0.54, alpha: 1)
+        case .comic: .white
+        case .bebas: UIColor(red: 0.25, green: 0.85, blue: 1, alpha: 1)
+        case .poppins: UIColor(red: 1, green: 0.04, blue: 0.54, alpha: 1)
+        case .clasico, .caja: nil
+        }
+    }
+    var stroke: Bool { self != .caja }
+    var pop: Bool { self != .clasico && self != .caja }
+    var box: UIColor? { self == .caja ? UIColor.black.withAlphaComponent(0.7) : nil }
+
+    func font(_ size: CGFloat) -> UIFont {
+        if let n = fontName, let f = UIFont(name: n, size: size) { return f }
+        return UIFont.systemFont(ofSize: size, weight: .heavy)
+    }
+
+    /// Frase con la palabra «highlight» en el color de resaltado.
+    func attributed(_ words: [String], highlight hi: Int?, size: CGFloat) -> NSAttributedString {
+        let out = NSMutableAttributedString()
+        let shadow = NSShadow()
+        shadow.shadowColor = UIColor.black.withAlphaComponent(0.55)
+        shadow.shadowBlurRadius = size * 0.12
+        shadow.shadowOffset = CGSize(width: 0, height: size * 0.05)
+        for (i, w) in words.enumerated() {
+            var a: [NSAttributedString.Key: Any] = [.font: font(size), .foregroundColor: (i == hi ? (highlight ?? base) : base), .shadow: shadow]
+            if stroke { a[.strokeColor] = UIColor.black; a[.strokeWidth] = -4.5 }
+            out.append(NSAttributedString(string: (uppercase ? w.uppercased() : w) + (i < words.count - 1 ? " " : ""), attributes: a))
+        }
+        return out
+    }
+
+    // Para la vista previa en la app
+    var textColor: Color { Color(uiColor: base) }
+    var boxColor: Color { self == .caja ? .black.opacity(0.75) : .clear }
+    var previewFont: Font { fontName.map { .custom($0, size: 15) } ?? .system(size: 14, weight: .heavy) }
+    var previewHighlight: Color { highlight.map { Color(uiColor: $0) } ?? textColor }
 }

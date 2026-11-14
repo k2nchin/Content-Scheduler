@@ -42,5 +42,6 @@ targets:
         NIMEmbeddedKey: "$(NIM_EMBEDDED_KEY)"
         TwitchClientID: "$(TWITCH_CLIENT_ID)"
         ITSAppUsesNonExemptEncryption: false
+        UIAppFonts: [Anton-Regular.ttf, ArchivoBlack-Regular.ttf, Bangers-Regular.ttf, BebasNeue-Regular.ttf, LuckiestGuy-Regular.ttf, Poppins-Black.ttf, Poppins-ExtraBold.ttf]
         UIBackgroundModes: [fetch]
         BGTaskSchedulerPermittedIdentifiers: [com.contentscheduler.app.refresh]

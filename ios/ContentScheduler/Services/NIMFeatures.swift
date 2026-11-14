@@ -60,7 +60,9 @@ extension NIM {
         guard let data = json(raw), let w = try? JSONDecoder().decode(Wrap.self, from: data), w.lines.count == lines.count else { return lines }
         return zip(lines, w.lines).map { l, t in
             let fixed = t.trimmingCharacters(in: .whitespaces)
-            return StudioExport.Line(text: fixed.isEmpty ? l.text : fixed, start: l.start, end: l.end)
+            let fw = fixed.split(separator: " ").map(String.init)
+            let words = fw.count == l.words.count ? zip(l.words, fw).map { StudioExport.Word(text: $1, start: $0.start, end: $0.end) } : l.words
+            return StudioExport.Line(text: fixed.isEmpty ? l.text : fixed, start: l.start, end: l.end, words: fixed.isEmpty ? l.words : words)
         }
     }
 

@@ -46,7 +46,7 @@ struct ClipperView: View {
     @State private var working = false
     @State private var status = ""
     @State private var step: Step = .fuente
-    @State private var subStyle: SubStyle = .clasico
+    @State private var subStyle: SubStyle = .viral
     @State private var made: [Made] = []
     @State private var progress = 0.0
     @State private var stage = 0          // 0 escuchar, 1 elegir, 2 crear
@@ -181,8 +181,9 @@ struct ClipperView: View {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                     ForEach(SubStyle.allCases, id: \.self) { st in
                         Button { subStyle = st } label: {
-                            Text(st.sample).font(.system(size: 13, weight: .heavy))
-                                .foregroundStyle(st.textColor).padding(.horizontal, 8).padding(.vertical, 6)
+                            (Text("ESTO ").foregroundStyle(st.textColor) + Text(st.sample).foregroundStyle(st.previewHighlight))
+                                .font(st.previewFont).shadow(color: .black, radius: 1, x: 1, y: 1)
+                                .padding(.horizontal, 8).padding(.vertical, 6)
                                 .background(st.boxColor, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                                 .frame(maxWidth: .infinity).padding(.vertical, 10)
                                 .background(Color.gray.opacity(0.35))

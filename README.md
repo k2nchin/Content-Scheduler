@@ -19,6 +19,7 @@ La ventana de herramientas de Content Scheduler como app nativa para iPhone (Swi
 - **Primer comentario** automático al publicarse (YouTube, Facebook, Instagram).
 - **Portada** elegida en el Estudio (se sube como miniatura en YouTube) y **convertir a vertical 9:16** con fondo difuminado.
 - **Clipping en vivo** (Clipper): graba con la cámara en partes de 3 min y, al cerrar cada parte, convierte en clips los momentos marcados (botón «Clip» o picos de energía del audio) y los manda a la cola mientras sigues grabando.
+- **Subtítulos tipo CapCut**: fuentes gruesas incluidas (Anton, Bebas Neue, Archivo Black, Poppins, Bangers, Luckiest Guy; licencias OFL/Apache en `ios/ContentScheduler/Fonts`), la palabra que se dice resaltada en color, borde fuerte y animación «pop».
 - **Seguimiento de cámara**: al pasar a 9:16, una cámara virtual sigue la cara de quien habla (Vision del iPhone: caras → cuerpo → lo más llamativo), sin temblores y con movimiento suave.
 - **Clipper** (en Contenido): de un video largo saca varios clips —a mano, en partes iguales o en los momentos con más energía del audio— y los manda a la cola, con opción vertical 9:16 y subtítulos.
 - **Reporte semanal** los lunes, **bloqueo con Face ID** y **copia de seguridad** (exportar/restaurar).
