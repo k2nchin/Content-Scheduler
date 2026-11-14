@@ -210,7 +210,8 @@ enum StudioExport {
     struct Word { let text: String; let start: Double; let end: Double }
     struct Line { let text: String; let start: Double; let end: Double; var words: [Word] = [] }
 
-    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, track: Bool = true, hook: String? = nil, style: SubStyle = .viral, effect: SubEffect = .pop, status: @escaping (String) -> Void) async throws -> URL {
+    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, track: Bool = true, hook: String? = nil, style: SubStyle = .viral, effect: SubEffect = .pop,
+                    removeSilence: Bool = false, emojis: Bool = false, progressBar: Bool = false, position: SubPosition = .abajo, status: @escaping (String) -> Void) async throws -> URL {
         var source = source
         var start = start, end = end
         if vertical {
@@ -218,6 +219,15 @@ enum StudioExport {
             source = track ? try await CameraTracker.render(source, start: start, end: end, status: status)
                            : try await makeVertical(source, start: start, end: end)
             end -= start; start = 0
+        }
+        if removeSilence {
+            status("Quitando silencios…")
+            if let cut = try? await removeSilences(source, start: start, end: end) {
+                let d = (try? await AVURLAsset(url: cut).load(.duration).seconds) ?? (end - start)
+                source = cut
+                start = 0
+                end = d
+            }
         }
         let asset = AVURLAsset(url: source)
         let range = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600), end: CMTime(seconds: end, preferredTimescale: 600))
@@ -256,7 +266,7 @@ enum StudioExport {
         let hookText = hook?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let r0 = natural.applying(transform)
         let wmLayer = Watermark.layer(for: CGSize(width: abs(r0.width), height: abs(r0.height)))
-        if !lines.isEmpty || !hookText.isEmpty || wmLayer != nil {
+        if !lines.isEmpty || !hookText.isEmpty || wmLayer != nil || progressBar {
             let r = natural.applying(transform)
             let size = CGSize(width: abs(r.width), height: abs(r.height))
             let vc = AVMutableVideoComposition()
@@ -288,7 +298,7 @@ enum StudioExport {
                     text.alignmentMode = .center
                     text.isWrapped = true
                     text.contentsScale = 2
-                    text.frame = CGRect(x: size.width * 0.06, y: size.height * 0.2, width: size.width * 0.88, height: fontSize * 2.8)
+                    text.frame = CGRect(x: size.width * 0.06, y: size.height * position.y, width: size.width * 0.88, height: fontSize * 2.8)
                     text.opacity = 0
                     let begin = st.start <= 0 ? AVCoreAnimationBeginTimeAtZero : st.start
                     let show = CABasicAnimation(keyPath: "opacity")
@@ -305,6 +315,45 @@ enum StudioExport {
                     }
                     parent.addSublayer(text)
                 }
+                if emojis, let e = EmojiMap.find(in: line.text) {
+                    // Emoji grande sobre la frase, mientras se dice
+                    let el = CATextLayer()
+                    el.string = NSAttributedString(string: e, attributes: [.font: UIFont.systemFont(ofSize: fontSize * 1.5)])
+                    el.alignmentMode = .center
+                    el.contentsScale = 2
+                    el.frame = CGRect(x: size.width * 0.3, y: size.height * position.y + fontSize * 2.9, width: size.width * 0.4, height: fontSize * 2)
+                    el.opacity = 0
+                    let begin = line.start <= 0 ? AVCoreAnimationBeginTimeAtZero : line.start
+                    let show = CABasicAnimation(keyPath: "opacity")
+                    show.fromValue = 1
+                    show.toValue = 1
+                    show.beginTime = begin
+                    show.duration = max(0.3, line.end - line.start)
+                    show.isRemovedOnCompletion = true
+                    el.add(show, forKey: "show")
+                    if let pop = SubEffect.pop.animation(first: true, height: fontSize) {
+                        pop.beginTime = begin
+                        pop.isRemovedOnCompletion = true
+                        el.add(pop, forKey: "fx")
+                    }
+                    parent.addSublayer(el)
+                }
+            }
+            if progressBar {
+                // Barra de progreso rosa abajo, que se llena durante el clip
+                let bar = CALayer()
+                bar.backgroundColor = UIColor(red: 1, green: 0.04, blue: 0.54, alpha: 1).cgColor
+                bar.anchorPoint = CGPoint(x: 0, y: 0)
+                bar.frame = CGRect(x: 0, y: 0, width: size.width, height: max(6, size.height * 0.007))
+                let grow = CABasicAnimation(keyPath: "transform.scale.x")
+                grow.fromValue = 0.001
+                grow.toValue = 1
+                grow.beginTime = AVCoreAnimationBeginTimeAtZero
+                grow.duration = max(0.5, comp.duration.seconds)
+                grow.isRemovedOnCompletion = false
+                grow.fillMode = .both
+                bar.add(grow, forKey: "grow")
+                parent.addSublayer(bar)
             }
             if let wmLayer { parent.addSublayer(wmLayer) }
             if !hookText.isEmpty {
@@ -378,6 +427,59 @@ enum StudioExport {
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in ex.exportAsynchronously { c.resume() } }
         guard ex.status == .completed else { throw YTError(message: "No se pudo pasar a vertical: \(ex.error?.localizedDescription ?? "error")") }
         return dest
+    }
+
+    /// Corta los silencios largos (más de 0,7 s) de un tramo y devuelve un video nuevo; nil si no hay nada que cortar.
+    static func removeSilences(_ url: URL, start: Double, end: Double) async throws -> URL? {
+        let asset = AVURLAsset(url: url)
+        let total = end - start
+        let win = 0.1
+        let range = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600), end: CMTime(seconds: end, preferredTimescale: 600))
+        let levels = try await AudioEnergy.levels(of: url, window: win, range: range)
+        guard levels.count > 10, let peak = levels.max(), peak > 0 else { return nil }
+        let thr = max(Float(0.006), peak * 0.05)
+        var keep: [(Double, Double)] = []
+        var segStart = 0.0
+        var i = 0
+        while i < levels.count {
+            if levels[i] < thr {
+                var j = i
+                while j < levels.count && levels[j] < thr { j += 1 }
+                if Double(j - i) * win >= 0.7 {
+                    let cutFrom = Double(i) * win + 0.2      // deja un respiro de 0,2 s a cada lado
+                    let cutTo = Double(j) * win - 0.2
+                    if cutFrom > segStart { keep.append((segStart, cutFrom)) }
+                    segStart = cutTo
+                }
+                i = j
+            } else {
+                i += 1
+            }
+        }
+        if segStart < total { keep.append((segStart, total)) }
+        var kept = 0.0
+        for k in keep { kept += k.1 - k.0 }
+        guard total - kept >= 0.6, kept >= 2 else { return nil }
+
+        let comp = AVMutableComposition()
+        guard let vSrc = try await asset.loadTracks(withMediaType: .video).first,
+              let vDst = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) else { return nil }
+        let aSrc = try await asset.loadTracks(withMediaType: .audio).first
+        let aDst = aSrc == nil ? nil : comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid)
+        var cursor = CMTime.zero
+        for k in keep {
+            let r = CMTimeRange(start: CMTime(seconds: start + k.0, preferredTimescale: 600), end: CMTime(seconds: start + k.1, preferredTimescale: 600))
+            try vDst.insertTimeRange(r, of: vSrc, at: cursor)
+            if let aSrc, let aDst { try aDst.insertTimeRange(r, of: aSrc, at: cursor) }
+            cursor = CMTimeAdd(cursor, r.duration)
+        }
+        vDst.preferredTransform = try await vSrc.load(.preferredTransform)
+        guard let ex = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetHighestQuality) else { return nil }
+        let dest = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
+        ex.outputURL = dest
+        ex.outputFileType = .mp4
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in ex.exportAsynchronously { c.resume() } }
+        return ex.status == .completed ? dest : nil
     }
 
     static func exportAudio(_ asset: AVAsset, range: CMTimeRange) async throws -> URL {
@@ -598,5 +700,43 @@ struct SubEffectPicker: View {
                 }
             }
         }.scrollIndicators(.hidden)
+    }
+}
+
+
+/// Dónde van los subtítulos en el video.
+enum SubPosition: String, CaseIterable, Hashable {
+    case arriba, centro, abajo
+    var label: String { switch self { case .arriba: "Arriba"; case .centro: "Centro"; case .abajo: "Abajo" } }
+    /// Altura como fracción del alto del video (0 = abajo).
+    var y: CGFloat { switch self { case .arriba: 0.56; case .centro: 0.42; case .abajo: 0.2 } }
+}
+
+/// Emojis automáticos según lo que se dice en la frase.
+enum EmojiMap {
+    static let map: [([String], String)] = [
+        (["jaja", "risa", "reír", "reir", "chiste"], "😂"),
+        (["fuego", "duro", "brutal", "candela", "prendí", "prendi"], "🔥"),
+        (["amor", "te amo", "corazón", "corazon", "te quiero"], "❤️"),
+        (["dinero", "cuarto", "plata", "millones", "pagar"], "💸"),
+        (["música", "musica", "canción", "cancion", "tema", "cantar"], "🎶"),
+        (["miedo", "susto", "terror"], "😱"),
+        (["no puede ser", "increíble", "increible", "wow", "no me lo"], "😳"),
+        (["llorar", "triste", "lloré", "llore"], "😭"),
+        (["gracias", "bendiciones", "dios"], "🙏"),
+        (["fiesta", "party", "celebr"], "🎉"),
+        (["ganar", "ganamos", "campeón", "campeon", "gané", "gane"], "🏆"),
+        (["comida", "comer", "hambre"], "🍽️"),
+        (["loco", "locura"], "🤪"),
+        (["mentira", "embuste"], "🤥"),
+        (["dominicana", "dominicano", "quisqueya"], "🇩🇴"),
+        (["klk", "qué lo qué", "que lo que", "dímelo", "dimelo"], "🤙"),
+        (["ojo", "cuidado", "atención", "atencion"], "👀"),
+        (["tiempo", "hora", "rápido", "rapido"], "⏰"),
+    ]
+    static func find(in text: String) -> String? {
+        let t = text.lowercased()
+        for (keys, emoji) in map where keys.contains(where: { t.contains($0) }) { return emoji }
+        return nil
     }
 }

@@ -48,6 +48,10 @@ struct ClipperView: View {
     @State private var step: Step = .fuente
     @State private var subStyle: SubStyle = .viral
     @State private var subEffect: SubEffect = .pop
+    @State private var subPos: SubPosition = .abajo
+    @State private var noSilence = true
+    @State private var autoEmoji = true
+    @State private var progressBar = true
     @State private var made: [Made] = []
     @State private var progress = 0.0
     @State private var stage = 0          // 0 escuchar, 1 elegir, 2 crear
@@ -66,6 +70,7 @@ struct ClipperView: View {
                 case .resultados: resultsStep
                 }
             }
+            .animation(.snappy(duration: 0.25), value: step)
             .toolbar {
                 if !inTab { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { discardAll(); cleanup(); dismiss() }.disabled(working) } }
             }
@@ -176,8 +181,34 @@ struct ClipperView: View {
         }
         SectionLabel(text: "Formato y estilo")
         optionsBox
+        Box {
+            Toggle(isOn: $noSilence) {
+                VStack(alignment: .leading) {
+                    Text("Quitar silencios").bold()
+                    Text("Corta las pausas de más de 0,7 s para que el clip no pierda ritmo.").font(.caption).foregroundStyle(Theme.muted)
+                }
+            }
+            Divider().overlay(Theme.line)
+            Toggle(isOn: $autoEmoji) {
+                VStack(alignment: .leading) {
+                    Text("Emojis automáticos").bold()
+                    Text("Pone un emoji grande según lo que se dice (🔥 😂 😳 🇩🇴…).").font(.caption).foregroundStyle(Theme.muted)
+                }
+            }.disabled(!subtitles)
+            Divider().overlay(Theme.line)
+            Toggle(isOn: $progressBar) {
+                VStack(alignment: .leading) {
+                    Text("Barra de progreso").bold()
+                    Text("Una línea rosa abajo que se llena; ayuda a que vean el clip completo.").font(.caption).foregroundStyle(Theme.muted)
+                }
+            }
+        }
         if subtitles {
             Box {
+                Text("POSICIÓN").font(Theme.mono).foregroundStyle(Theme.muted)
+                Picker("Posición", selection: $subPos) {
+                    ForEach(SubPosition.allCases, id: \.self) { Text($0.label).tag($0) }
+                }.pickerStyle(.segmented)
                 Text("EFECTO").font(Theme.mono).foregroundStyle(Theme.muted)
                 SubEffectPicker(effect: $subEffect)
                 Text("ESTILO DE SUBTÍTULOS").font(Theme.mono).foregroundStyle(Theme.muted)
@@ -583,7 +614,8 @@ struct ClipperView: View {
             do {
                 let url = try await StudioExport.run(source: source, start: c.start, end: c.end, subtitles: subtitles,
                                                      vertical: vertical && isHorizontal, track: track,
-                                                     hook: hooks ? c.ai?.hook : nil, style: subStyle, effect: subEffect) { _ in }
+                                                     hook: hooks ? c.ai?.hook : nil, style: subStyle, effect: subEffect,
+                                                     removeSilence: noSilence, emojis: autoEmoji && subtitles, progressBar: progressBar, position: subPos) { _ in }
                 let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
                 gen.appliesPreferredTrackTransform = true
                 gen.maximumSize = CGSize(width: 400, height: 400)
@@ -662,6 +694,7 @@ struct ResultCard: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(height: 210)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             Text(made.title).font(.footnote.bold()).lineLimit(2).foregroundStyle(Theme.fg)
             Text("\(Int(made.clip.end - made.clip.start)) s").font(.caption2).foregroundStyle(Theme.muted)
         }
@@ -709,7 +742,7 @@ struct ResultPreview: View {
 
 /// Mide el volumen (RMS) del audio por ventanas, leyendo las muestras reales del video.
 enum AudioEnergy {
-    static func levels(of url: URL, window: Double) async throws -> [Float] {
+    static func levels(of url: URL, window: Double, range: CMTimeRange? = nil) async throws -> [Float] {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return [] }
         let reader = try AVAssetReader(asset: asset)
@@ -724,6 +757,7 @@ enum AudioEnergy {
             AVLinearPCMIsNonInterleaved: false,
         ])
         reader.add(output)
+        if let range { reader.timeRange = range }
         guard reader.startReading() else { throw YTError(message: "No se pudo leer el audio del video.") }
         let per = Int(rate * window)
         var levels: [Float] = []

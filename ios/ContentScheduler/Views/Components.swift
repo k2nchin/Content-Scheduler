@@ -149,6 +149,7 @@ struct Card<Content: View>: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.bg2, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Color.white.opacity(0.06)))
     }
 }
 struct PrimaryButtonStyle: ButtonStyle {
@@ -160,6 +161,7 @@ struct PrimaryButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity).padding(.vertical, 15)
             .foregroundStyle(filled ? .white : color)
             .background(filled ? color : color.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+            .shadow(color: filled ? color.opacity(0.35) : .clear, radius: 12, y: 5)
             .opacity(configuration.isPressed ? 0.75 : 1)
             .scaleEffect(configuration.isPressed ? 0.98 : 1)
             .animation(.spring(duration: 0.2), value: configuration.isPressed)
@@ -234,7 +236,8 @@ struct BottomBar: View {
                 } label: {
                     VStack(spacing: 3) {
                         Image(systemName: t.icon).symbolVariant(tab == t ? .fill : .none)
-                            .font(.system(size: 21, weight: .medium)).frame(height: 26)
+                            .font(.system(size: 20, weight: .medium)).frame(width: 52, height: 28)
+                            .background(tab == t ? Theme.accent.opacity(0.16) : .clear, in: Capsule())
                         Text(t.label.capitalized(with: Locale(identifier: "es"))).font(.system(size: 10, weight: .medium))
                             .lineLimit(1).minimumScaleFactor(0.8)
                     }
@@ -270,6 +273,7 @@ struct Box<Content: View>: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.bg2, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Color.white.opacity(0.06)))
     }
 }
 extension UUID: @retroactive Identifiable { public var id: UUID { self } }
