@@ -47,6 +47,7 @@ struct ClipperView: View {
     @State private var status = ""
     @State private var step: Step = .fuente
     @State private var subStyle: SubStyle = .viral
+    @State private var subEffect: SubEffect = .pop
     @State private var made: [Made] = []
     @State private var progress = 0.0
     @State private var stage = 0          // 0 escuchar, 1 elegir, 2 crear
@@ -177,6 +178,8 @@ struct ClipperView: View {
         optionsBox
         if subtitles {
             Box {
+                Text("EFECTO").font(Theme.mono).foregroundStyle(Theme.muted)
+                SubEffectPicker(effect: $subEffect)
                 Text("ESTILO DE SUBTÍTULOS").font(Theme.mono).foregroundStyle(Theme.muted)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                     ForEach(SubStyle.allCases, id: \.self) { st in
@@ -580,7 +583,7 @@ struct ClipperView: View {
             do {
                 let url = try await StudioExport.run(source: source, start: c.start, end: c.end, subtitles: subtitles,
                                                      vertical: vertical && isHorizontal, track: track,
-                                                     hook: hooks ? c.ai?.hook : nil, style: subStyle) { _ in }
+                                                     hook: hooks ? c.ai?.hook : nil, style: subStyle, effect: subEffect) { _ in }
                 let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
                 gen.appliesPreferredTrackTransform = true
                 gen.maximumSize = CGSize(width: 400, height: 400)

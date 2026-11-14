@@ -210,7 +210,7 @@ enum StudioExport {
     struct Word { let text: String; let start: Double; let end: Double }
     struct Line { let text: String; let start: Double; let end: Double; var words: [Word] = [] }
 
-    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, track: Bool = true, hook: String? = nil, style: SubStyle = .viral, status: @escaping (String) -> Void) async throws -> URL {
+    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, track: Bool = true, hook: String? = nil, style: SubStyle = .viral, effect: SubEffect = .pop, status: @escaping (String) -> Void) async throws -> URL {
         var source = source
         var start = start, end = end
         if vertical {
@@ -282,7 +282,8 @@ enum StudioExport {
                     : [(line.start, line.end, nil)]
                 for (k, st) in steps.enumerated() {
                     let text = CATextLayer()
-                    text.string = style.attributed(line.words.isEmpty ? [line.text] : line.words.map(\.text), highlight: st.hi, size: fontSize)
+                    text.string = style.attributed(line.words.isEmpty ? [line.text] : line.words.map(\.text), highlight: st.hi, size: fontSize,
+                                                   revealUpTo: effect == .maquina ? st.hi : nil, glow: effect == .brillo)
                     if let box = style.box { text.backgroundColor = box.cgColor; text.cornerRadius = fontSize * 0.28 }
                     text.alignmentMode = .center
                     text.isWrapped = true
@@ -297,15 +298,10 @@ enum StudioExport {
                     show.duration = max(0.08, st.end - st.start)
                     show.isRemovedOnCompletion = true
                     text.add(show, forKey: "show")
-                    if style.pop && (k == 0 || st.hi != nil) {
-                        // Pequeño «pop» al aparecer, como los subtítulos virales
-                        let pop = CAKeyframeAnimation(keyPath: "transform.scale")
-                        pop.values = k == 0 ? [0.8, 1.08, 1.0] : [0.96, 1.03, 1.0]
-                        pop.keyTimes = [0, 0.6, 1]
-                        pop.duration = 0.16
-                        pop.beginTime = begin
-                        pop.isRemovedOnCompletion = true
-                        text.add(pop, forKey: "pop")
+                    if let anim = effect.animation(first: k == 0, height: fontSize) {
+                        anim.beginTime = begin
+                        anim.isRemovedOnCompletion = true
+                        text.add(anim, forKey: "fx")
                     }
                     parent.addSublayer(text)
                 }
@@ -511,15 +507,16 @@ enum SubStyle: String, CaseIterable, Hashable {
     }
 
     /// Frase con la palabra «highlight» en el color de resaltado.
-    func attributed(_ words: [String], highlight hi: Int?, size: CGFloat) -> NSAttributedString {
+    func attributed(_ words: [String], highlight hi: Int?, size: CGFloat, revealUpTo: Int? = nil, glow: Bool = false) -> NSAttributedString {
         let out = NSMutableAttributedString()
         let shadow = NSShadow()
-        shadow.shadowColor = UIColor.black.withAlphaComponent(0.55)
-        shadow.shadowBlurRadius = size * 0.12
-        shadow.shadowOffset = CGSize(width: 0, height: size * 0.05)
+        shadow.shadowColor = glow ? (highlight ?? base).withAlphaComponent(0.95) : UIColor.black.withAlphaComponent(0.55)
+        shadow.shadowBlurRadius = glow ? size * 0.45 : size * 0.12
+        shadow.shadowOffset = glow ? .zero : CGSize(width: 0, height: size * 0.05)
         for (i, w) in words.enumerated() {
-            var a: [NSAttributedString.Key: Any] = [.font: font(size), .foregroundColor: (i == hi ? (highlight ?? base) : base), .shadow: shadow]
-            if stroke { a[.strokeColor] = UIColor.black; a[.strokeWidth] = -4.5 }
+            let hidden = revealUpTo.map { i > $0 } ?? false
+            var a: [NSAttributedString.Key: Any] = [.font: font(size), .foregroundColor: hidden ? UIColor.clear : (i == hi ? (highlight ?? base) : base), .shadow: hidden ? NSShadow() : shadow]
+            if stroke && !hidden { a[.strokeColor] = UIColor.black; a[.strokeWidth] = -4.5 }
             out.append(NSAttributedString(string: (uppercase ? w.uppercased() : w) + (i < words.count - 1 ? " " : ""), attributes: a))
         }
         return out
@@ -530,4 +527,76 @@ enum SubStyle: String, CaseIterable, Hashable {
     var boxColor: Color { self == .caja ? .black.opacity(0.75) : .clear }
     var previewFont: Font { fontName.map { .custom($0, size: 15) } ?? .system(size: 14, weight: .heavy) }
     var previewHighlight: Color { highlight.map { Color(uiColor: $0) } ?? textColor }
+}
+
+
+/// Efectos de animación de los subtítulos (se combinan con cualquier estilo).
+enum SubEffect: String, CaseIterable, Hashable {
+    case pop, rebote, maquina, brillo, sacudida, zoom, ninguno
+    var label: String {
+        switch self {
+        case .pop: "Pop"; case .rebote: "Rebote"; case .maquina: "Máquina"; case .brillo: "Brillo"
+        case .sacudida: "Sacudida"; case .zoom: "Zoom"; case .ninguno: "Ninguno"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .pop: "sparkle"; case .rebote: "arrow.down.to.line"; case .maquina: "character.cursor.ibeam"; case .brillo: "light.max"
+        case .sacudida: "waveform.path"; case .zoom: "plus.magnifyingglass"; case .ninguno: "nosign"
+        }
+    }
+    /// Animación para una capa de subtítulo. «first» = la primera capa de la frase (cuando entra).
+    func animation(first: Bool, height: CGFloat) -> CAAnimation? {
+        switch self {
+        case .pop:
+            let a = CAKeyframeAnimation(keyPath: "transform.scale")
+            a.values = first ? [0.8, 1.08, 1.0] : [0.96, 1.03, 1.0]; a.keyTimes = [0, 0.6, 1]; a.duration = 0.16
+            return a
+        case .rebote:
+            guard first else { return nil }
+            let a = CAKeyframeAnimation(keyPath: "transform.translation.y")
+            a.values = [height * 1.2, -height * 0.18, height * 0.06, 0]; a.keyTimes = [0, 0.55, 0.8, 1]; a.duration = 0.32
+            return a
+        case .maquina:
+            return nil   // las palabras aparecen una a una (se resuelve en el texto)
+        case .brillo:
+            let a = CAKeyframeAnimation(keyPath: "opacity")
+            a.values = [1, 0.82, 1]; a.keyTimes = [0, 0.5, 1]; a.duration = 0.3
+            return first ? a : nil
+        case .sacudida:
+            let a = CAKeyframeAnimation(keyPath: "transform.rotation.z")
+            let r = 0.045
+            a.values = [0, r, -r, r * 0.6, -r * 0.6, 0]; a.duration = 0.22
+            return a
+        case .zoom:
+            guard first else { return nil }
+            let a = CAKeyframeAnimation(keyPath: "transform.scale")
+            a.values = [1.6, 0.95, 1.0]; a.keyTimes = [0, 0.7, 1]; a.duration = 0.22
+            return a
+        case .ninguno:
+            return nil
+        }
+    }
+}
+
+/// Selector de efectos con íconos.
+struct SubEffectPicker: View {
+    @Binding var effect: SubEffect
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(SubEffect.allCases, id: \.self) { e in
+                    Button { effect = e } label: {
+                        VStack(spacing: 5) {
+                            Image(systemName: e.icon).font(.system(size: 18, weight: .semibold))
+                            Text(e.label).font(.caption2.weight(.semibold))
+                        }
+                        .frame(width: 70, height: 58)
+                        .foregroundStyle(effect == e ? .white : Theme.muted)
+                        .background(effect == e ? Theme.accent : Theme.bg3, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }.buttonStyle(.plain)
+                }
+            }
+        }.scrollIndicators(.hidden)
+    }
 }
