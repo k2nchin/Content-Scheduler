@@ -139,6 +139,9 @@ final class YouTubeService: NSObject {
         return t
     }
 
+    /// Token de la cuenta activa (lo usa la IA del Clipper para identificarte).
+    func activeToken() async throws -> String { try await token() }
+
     private func token(for account: String? = nil) async throws -> String {
         guard let id = account ?? channel?.id else { throw YTError(message: "Conecta YouTube en Ajustes.") }
         if let c = tokens[id], Date.now < c.exp { return c.token }

@@ -36,6 +36,7 @@ targets:
           - CFBundleURLSchemes: ["$(GOOGLE_REVERSED_CLIENT_ID)"]
         GoogleClientID: "$(GOOGLE_IOS_CLIENT_ID)"
         MetaAppID: "$(META_APP_ID)"
+        ClipAIURL: "$(CLIP_AI_URL)"
         ITSAppUsesNonExemptEncryption: false
         UIBackgroundModes: [fetch]
         BGTaskSchedulerPermittedIdentifiers: [com.contentscheduler.app.refresh]

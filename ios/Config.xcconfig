@@ -5,3 +5,6 @@ GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.84783551840-mki8tk5nse0mh
 
 // App ID de tu app de Meta (developers.facebook.com > tu app > Configuración > Básica). Es público, NO es el secreto.
 META_APP_ID = 1611404507348655
+
+// Dirección de la IA del Clipper (función /api/clip-ai de tu ViralCut en Vercel), por ejemplo https://tuapp.vercel.app/api/clip-ai
+CLIP_AI_URL = 

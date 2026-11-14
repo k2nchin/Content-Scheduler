@@ -11,8 +11,8 @@ struct ClipperView: View {
     @Environment(YouTubeService.self) private var youtube
     @Environment(\.dismiss) private var dismiss
 
-    struct Clip: Identifiable, Hashable { let id = UUID(); var start: Double; var end: Double; var energy: Double? }
-    enum Mode: String, CaseIterable { case energia = "Más energía", dividir = "Dividir", manual = "A mano" }
+    struct Clip: Identifiable, Hashable { let id = UUID(); var start: Double; var end: Double; var energy: Double?; var ai: ClipAI.Result? = nil }
+    enum Mode: String, CaseIterable { case ia = "IA", energia = "Energía", dividir = "Dividir", manual = "A mano" }
 
     @State private var pick: PhotosPickerItem?
     @State private var importingFile = false
@@ -25,7 +25,8 @@ struct ClipperView: View {
     @State private var isHorizontal = false
     @State private var loading = false
 
-    @State private var mode: Mode = .energia
+    @State private var mode: Mode = .ia
+    @State private var transcript: [StudioExport.Line] = []
     @State private var length = 30.0
     @State private var count = 5
     @State private var markStart = 0.0
@@ -78,6 +79,7 @@ struct ClipperView: View {
                     Text("Duración: \(clock(duration))").font(.caption).foregroundStyle(Theme.muted)
                     modePicker
                     switch mode {
+                    case .ia: aiBox
                     case .energia: energyBox
                     case .dividir: splitBox
                     case .manual: manualBox
@@ -124,6 +126,25 @@ struct ClipperView: View {
                     .foregroundStyle(length == l ? Theme.bg : Theme.muted).background(length == l ? Theme.fg : Theme.bg2)
             }
         }.overlay(Rectangle().strokeBorder(Theme.line))
+    }
+
+    private var aiBox: some View {
+        Box {
+            Text("La IA (NVIDIA NIM) lee lo que se dice en el video y elige los momentos con más potencial viral, con gancho, títulos por red y hashtags. El iPhone transcribe el audio; solo el texto va a la IA.")
+                .font(.caption).foregroundStyle(Theme.muted)
+            if !ClipAI.isConfigured {
+                DemoBanner(text: "Falta conectar la IA: hay que poner la dirección de tu servidor (CLIP_AI_URL). Mientras tanto usa «Energía».", icon: "exclamationmark.triangle")
+            }
+            lengthPicker
+            Stepper("Cuántos clips: \(count)", value: $count, in: 1...15).font(.footnote)
+            Button { Task { await findAI() } } label: {
+                Label(transcript.isEmpty ? "Analizar con IA" : "Buscar otra vez con IA", systemImage: "sparkles")
+            }
+            .buttonStyle(BoxButtonStyle(filled: true)).disabled(working || !ClipAI.isConfigured)
+            if !transcript.isEmpty {
+                Text("Transcripción lista: \(transcript.count) frases.").font(.caption).foregroundStyle(Theme.muted)
+            }
+        }
     }
 
     private var energyBox: some View {
@@ -212,6 +233,16 @@ struct ClipperView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("\(clock(c.start)) → \(clock(c.end))").font(.system(size: 14, weight: .semibold, design: .monospaced))
                             Text("\(Int(c.end - c.start)) s" + (c.energy.map { " · energía \(Int($0 * 100))%" } ?? "")).font(.caption).foregroundStyle(Theme.muted)
+                            if let ai = c.ai {
+                                HStack(spacing: 6) {
+                                    Text("\(ai.score)").font(.system(size: 12, weight: .heavy, design: .monospaced))
+                                        .foregroundStyle(.white).padding(.horizontal, 6).padding(.vertical, 2)
+                                        .background(ai.score >= 70 ? Theme.ok : ai.score >= 45 ? Theme.warn : Theme.muted)
+                                    Text(ai.titles.youtube.isEmpty ? ai.hook : ai.titles.youtube).font(.caption.bold()).lineLimit(2)
+                                }
+                                if !ai.reason.isEmpty { Text(ai.reason).font(.caption2).foregroundStyle(Theme.muted).lineLimit(3) }
+                                if !ai.hashtags.isEmpty { Text(ai.hashtags.joined(separator: " ")).font(.caption2).foregroundStyle(Theme.accent).lineLimit(1) }
+                            }
                         }
                         Spacer()
                         // Guardar en Fotos: suspendido por ahora (los clips no se guardan en el iPhone)
@@ -302,6 +333,30 @@ struct ClipperView: View {
         vertical = isHorizontal
         clips = []
         levels = []
+        transcript = []
+    }
+
+    private func findAI() async {
+        guard let source else { return }
+        working = true
+        defer { working = false }
+        do {
+            if transcript.isEmpty {
+                transcript = try await ClipAI.transcribe(source, duration: duration) { status = $0 }
+                if transcript.isEmpty { return store.show("No se entendió voz en el video. Usa «Energía» para videos sin diálogo.") }
+            }
+            status = "La IA está eligiendo los mejores momentos…"
+            let token: String
+            if youtube.isConnected { token = try await youtube.activeToken() }
+            else if DriveService.shared.isConnected { token = try await DriveService.shared.accessToken() }
+            else { return store.show("Conecta YouTube o Google Drive en Ajustes para usar la IA.") }
+            let found = try await ClipAI.findClips(lines: transcript, duration: duration, count: count, length: length, token: token)
+            if found.isEmpty { return store.show("La IA no encontró momentos claros. Prueba con otra duración o con «Energía».") }
+            clips = found.map { Clip(start: $0.start, end: $0.end, energy: nil, ai: $0) }.sorted { $0.start < $1.start }
+            seek(clips[0].start)
+        } catch {
+            store.show(error.localizedDescription)
+        }
     }
 
     private func findEnergy() async {
@@ -348,6 +403,15 @@ struct ClipperView: View {
             do {
                 let url = try await StudioExport.run(source: source, start: c.start, end: c.end, subtitles: subtitles, vertical: vertical && isHorizontal) { _ in }
                 let id = await store.addVideo(from: url, youtubeConnected: youtube.isConnected)
+                if let ai = c.ai {
+                    store.update(id) {
+                        let main = ai.titles.youtube.isEmpty ? ai.hook : ai.titles.youtube
+                        if !main.isEmpty { $0.title = String(main.prefix(100)) }
+                        $0.custom = [Network.instagram.rawValue: ai.titles.instagram, Network.facebook.rawValue: ai.titles.facebook]
+                            .filter { !$0.value.isEmpty }
+                        if !ai.hashtags.isEmpty { $0.tags = ai.hashtags.joined(separator: " ") }
+                    }
+                }
                 if drive.isConnected && drive.useDrive {
                     status = "Guardando clip \(i + 1) en Google Drive…"
                     do {

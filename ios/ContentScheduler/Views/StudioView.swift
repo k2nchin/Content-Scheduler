@@ -273,7 +273,7 @@ enum StudioExport {
         return dest
     }
 
-    private static func exportAudio(_ asset: AVAsset, range: CMTimeRange) async throws -> URL {
+    static func exportAudio(_ asset: AVAsset, range: CMTimeRange) async throws -> URL {
         guard let ex = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
             throw YTError(message: "Este video no tiene audio que se pueda leer.")
         }
@@ -286,7 +286,7 @@ enum StudioExport {
         return out
     }
 
-    private static func transcribe(_ audio: URL) async throws -> [Line] {
+    static func transcribe(_ audio: URL) async throws -> [Line] {
         let auth = await withCheckedContinuation { (c: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
             SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) }
         }
@@ -298,6 +298,7 @@ enum StudioExport {
         }
         let request = SFSpeechURLRecognitionRequest(url: audio)
         request.shouldReportPartialResults = false
+        if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
         request.addsPunctuation = true
         let segments: [SFTranscriptionSegment] = try await withCheckedThrowingContinuation { cont in
             var done = false

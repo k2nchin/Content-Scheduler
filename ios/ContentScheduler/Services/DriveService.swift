@@ -100,7 +100,7 @@ final class DriveService: NSObject {
         return t
     }
 
-    private func accessToken() async throws -> String {
+    func accessToken() async throws -> String {
         if let token, Date.now < token.exp { return token.value }
         guard let r = Keychain.get("drive.refresh") else { throw YTError(message: "Conecta Google Drive en Ajustes.") }
         let t = try await tokenRequest(["client_id": clientID, "refresh_token": r, "grant_type": "refresh_token"])
