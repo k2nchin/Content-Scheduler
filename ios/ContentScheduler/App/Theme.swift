@@ -1,16 +1,18 @@
 import SwiftUI
 
 enum Theme {
-    static let bg = Color(hex: 0x070708)
-    static let bg2 = Color(hex: 0x101012)
-    static let bg3 = Color(hex: 0x18181B)
-    static let fg = Color(hex: 0xF5F3EF)
-    static let muted = Color(hex: 0x8B8890)
-    static let accent = Color(hex: 0xFF0A8A)
-    static let line = Color(hex: 0x222126)
-    static let ok = Color(hex: 0x5EE6A8)
-    static let warn = Color(hex: 0xFFC65C)
-    static let red = Color(hex: 0xFF6B6B)
+    // Estilo Apple: colores del sistema (se adaptan a modo claro y oscuro) + el rosa de la marca como acento.
+    static let bg = Color(uiColor: .systemGroupedBackground)
+    static let bg2 = Color(uiColor: .secondarySystemGroupedBackground)
+    static let bg3 = Color(uiColor: .tertiarySystemFill)
+    static let fg = Color(uiColor: .label)
+    static let muted = Color(uiColor: .secondaryLabel)
+    static let accent = Color(hex: 0xFF2D8A)
+    static let line = Color(uiColor: .separator)
+    static let ok = Color(uiColor: .systemGreen)
+    static let warn = Color(uiColor: .systemOrange)
+    static let red = Color(uiColor: .systemRed)
+    static let radius: CGFloat = 14
     static let gradients: [[Color]] = [
         [Color(hex: 0xFF0A8A), Color(hex: 0x7A2CFF)],
         [Color(hex: 0xFF7A00), Color(hex: 0xFF0A8A)],
@@ -20,8 +22,10 @@ enum Theme {
         [Color(hex: 0x5EE6A8), Color(hex: 0x00C2FF)],
     ]
 
-    static func display(_ size: CGFloat) -> Font { .system(size: size, weight: .black).width(.compressed) }
-    static let mono = Font.system(size: 11, weight: .medium, design: .monospaced)
+    /// Números y títulos grandes con San Francisco (como las apps de Apple).
+    static func display(_ size: CGFloat) -> Font { .system(size: size * 0.78, weight: .bold, design: .rounded) }
+    /// Encabezados de sección, como en Ajustes de iOS.
+    static let mono = Font.footnote.weight(.semibold)
 }
 
 extension Color {

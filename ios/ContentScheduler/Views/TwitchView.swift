@@ -48,9 +48,9 @@ struct TwitchView: View {
 
     private var watchBox: some View {
         Box {
-            Text("CANAL EN VIVO").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+            Text("CANAL EN VIVO").font(Theme.mono).foregroundStyle(Theme.muted)
             TextField("nombre del canal", text: $twitch.channel)
-                .textInputAutocapitalization(.never).autocorrectionDisabled().padding(10).background(Theme.bg3)
+                .textInputAutocapitalization(.never).autocorrectionDisabled().padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .disabled(twitch.watching)
             if twitch.watching {
                 HStack {

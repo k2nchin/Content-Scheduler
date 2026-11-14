@@ -110,7 +110,7 @@ struct ClipperView: View {
             Spacer()
             Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
         }
-        .padding(16).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+        .padding(16).background(Theme.bg2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     @ViewBuilder private var sourceStep: some View {
@@ -128,10 +128,10 @@ struct ClipperView: View {
         }.buttonStyle(.plain)
         if loading { ProgressView("Preparando video…").frame(maxWidth: .infinity) }
         Box {
-            Text("TU VIDEO DE YOUTUBE").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+            Text("TU VIDEO DE YOUTUBE").font(Theme.mono).foregroundStyle(Theme.muted)
             TextField("https://youtu.be/… o youtube.com/live/…", text: $ytLink)
                 .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                .padding(10).background(Theme.bg3)
+                .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             Button {
                 guard let id = youtubeID(ytLink) else { return store.show("Ese no parece un link de YouTube.") }
                 openURL(URL(string: "https://studio.youtube.com/video/\(id)/edit")!)
@@ -144,7 +144,7 @@ struct ClipperView: View {
 
     @ViewBuilder private var settingsStep: some View {
         if let player {
-            VideoPlayer(player: player).frame(height: 220).background(.black).clipShape(RoundedRectangle(cornerRadius: 10))
+            VideoPlayer(player: player).frame(height: 220).background(.black).clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         HStack {
             Text("Duración del video: \(clock(duration))").font(.caption).foregroundStyle(Theme.muted)
@@ -177,16 +177,17 @@ struct ClipperView: View {
         optionsBox
         if subtitles {
             Box {
-                Text("ESTILO DE SUBTÍTULOS").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                Text("ESTILO DE SUBTÍTULOS").font(Theme.mono).foregroundStyle(Theme.muted)
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                     ForEach(SubStyle.allCases, id: \.self) { st in
                         Button { subStyle = st } label: {
                             Text(st.sample).font(.system(size: 13, weight: .heavy))
                                 .foregroundStyle(st.textColor).padding(.horizontal, 8).padding(.vertical, 6)
-                                .background(st.boxColor, in: RoundedRectangle(cornerRadius: 6))
+                                .background(st.boxColor, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                                 .frame(maxWidth: .infinity).padding(.vertical, 10)
                                 .background(Color.gray.opacity(0.35))
-                                .overlay(Rectangle().strokeBorder(subStyle == st ? Theme.accent : .clear, lineWidth: 2))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(subStyle == st ? Theme.accent : .clear, lineWidth: 2))
                         }.buttonStyle(.plain)
                     }
                 }
@@ -245,7 +246,7 @@ struct ClipperView: View {
                     .font(.footnote).lineLimit(1).minimumScaleFactor(0.8)
                     .frame(maxWidth: .infinity).padding(.vertical, 10)
                     .foregroundStyle(mode == m ? .white : Theme.muted).background(mode == m ? Theme.accent : Theme.bg2)
-                    .overlay(Rectangle().strokeBorder(Theme.line))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
     }
@@ -257,7 +258,7 @@ struct ClipperView: View {
                     .font(.footnote).frame(maxWidth: .infinity).padding(.vertical, 8)
                     .foregroundStyle(length == l ? Theme.bg : Theme.muted).background(length == l ? Theme.fg : Theme.bg2)
             }
-        }.overlay(Rectangle().strokeBorder(Theme.line))
+        }.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var aiBox: some View {
@@ -382,7 +383,7 @@ struct ClipperView: View {
                             .disabled(true).foregroundStyle(Theme.muted.opacity(0.5))
                         Button { clips.removeAll { $0.id == c.id } } label: { Image(systemName: "xmark") }.foregroundStyle(Theme.muted)
                     }
-                    .padding(10).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+                    .padding(10).background(Theme.bg2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
         }
@@ -660,7 +661,7 @@ struct ResultCard: View {
             Text(made.title).font(.footnote.bold()).lineLimit(2).foregroundStyle(Theme.fg)
             Text("\(Int(made.clip.end - made.clip.start)) s").font(.caption2).foregroundStyle(Theme.muted)
         }
-        .padding(8).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+        .padding(8).background(Theme.bg2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -677,7 +678,7 @@ struct ResultPreview: View {
         NavigationStack {
             Screen {
                 if let player {
-                    VideoPlayer(player: player).frame(height: 420).background(.black).clipShape(RoundedRectangle(cornerRadius: 12))
+                    VideoPlayer(player: player).frame(height: 420).background(.black).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 if let ai = made.clip.ai {
                     HStack(spacing: 8) {
@@ -690,7 +691,7 @@ struct ResultPreview: View {
                     if !ai.hashtags.isEmpty { Text(ai.hashtags.joined(separator: " ")).font(.caption).foregroundStyle(Theme.accent) }
                 }
                 Text("Título").font(.caption).foregroundStyle(Theme.muted)
-                TextField("Título", text: $title, axis: .vertical).lineLimit(1...3).padding(10).background(Theme.bg3)
+                TextField("Título", text: $title, axis: .vertical).lineLimit(1...3).padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 Button { onQueue(title); dismiss() } label: { Text("A la cola") }.buttonStyle(PrimaryButtonStyle())
                 Button(role: .destructive) { onDiscard(); dismiss() } label: { Text("Descartar") }
                     .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.red))

@@ -27,7 +27,7 @@ struct CalendarView: View {
                 Text("Cada video nuevo toma el siguiente horario libre.").font(.footnote).foregroundStyle(Theme.muted)
                 if youtube.isConnected { bestHoursBox }
                 Box {
-                    Text("HORARIOS DE PUBLICACIÓN").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                    Text("HORARIOS DE PUBLICACIÓN").font(Theme.mono).foregroundStyle(Theme.muted)
                     FlowSlots(slots: store.state.slots.sorted()) { s in
                         if store.state.slots.count > 1 { store.state.slots.removeAll { $0 == s } } else { store.show("Deja al menos un horario") }
                     }
@@ -52,8 +52,7 @@ struct CalendarView: View {
                             }
                             .frame(maxWidth: .infinity).padding(.vertical, 8)
                             .foregroundStyle(i == selected ? Theme.bg : Theme.fg)
-                            .background(i == selected ? Theme.fg : Theme.bg2, in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line))
+                            .background(i == selected ? Theme.fg : Theme.bg2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }.buttonStyle(.plain)
                     }
                 }
@@ -71,7 +70,7 @@ struct CalendarView: View {
                                     HStack { Image(systemName: "plus"); Text("Espacio libre") }
                                         .font(.footnote).foregroundStyle(Theme.muted)
                                         .frame(maxWidth: .infinity, alignment: .leading).padding(12)
-                                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
+                                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line, style: StrokeStyle(lineWidth: 1, dash: [4])))
                                 }
                                 .simultaneousGesture(TapGesture().onEnded { targetTime = time(t, on: day) })
                             }
@@ -105,7 +104,7 @@ struct CalendarView: View {
     private var bestHoursBox: some View {
         Box {
             HStack {
-                Text("MEJOR HORA SEGÚN TU CANAL").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                Text("MEJOR HORA SEGÚN TU CANAL").font(Theme.mono).foregroundStyle(Theme.muted)
                 Spacer()
                 if loadingHours { ProgressView() }
             }

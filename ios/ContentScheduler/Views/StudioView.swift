@@ -33,11 +33,11 @@ struct StudioView: View {
                 if let player {
                     VideoPlayer(player: player)
                         .frame(height: 380).frame(maxWidth: .infinity)
-                        .background(.black).clipShape(RoundedRectangle(cornerRadius: 12))
+                        .background(.black).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 if duration > 0 {
                     Box {
-                        Text("RECORTAR").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                        Text("RECORTAR").font(Theme.mono).foregroundStyle(Theme.muted)
                         HStack {
                             Text("Inicio").font(.footnote).frame(width: 52, alignment: .leading)
                             Slider(value: $start, in: 0...duration) { editing in if !editing { seek(start) } }
@@ -52,12 +52,12 @@ struct StudioView: View {
                             .font(.caption).foregroundStyle(end - start > 180 ? Theme.warn : Theme.muted)
                     }
                     Box {
-                        Text("PORTADA").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                        Text("PORTADA").font(Theme.mono).foregroundStyle(Theme.muted)
                         HStack(alignment: .top, spacing: 12) {
                             Group {
                                 if let coverImage { Image(uiImage: coverImage).resizable().scaledToFill() } else { Theme.bg3 }
                             }
-                            .frame(width: 72, height: 110).clipShape(RoundedRectangle(cornerRadius: 8))
+                            .frame(width: 72, height: 110).clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                             VStack(alignment: .leading, spacing: 6) {
                                 Slider(value: $coverTime, in: 0...duration) { editing in if !editing { Task { await grabCover() } } }
                                 if NIM.isConfigured {
@@ -88,7 +88,7 @@ struct StudioView: View {
                             }
                         }
                         if useHook {
-                            TextField("Ej.: Nadie esperaba esto 😳", text: $hookText).padding(10).background(Theme.bg3)
+                            TextField("Ej.: Nadie esperaba esto 😳", text: $hookText).padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                             if NIM.isConfigured {
                                 Button { Task { await aiHook() } } label: { Label(aiBusy ? "Escribiendo…" : "✨ Escribir gancho con IA", systemImage: "text.bubble") }
                                     .font(.caption.bold()).foregroundStyle(Theme.accent).disabled(aiBusy)
@@ -433,7 +433,7 @@ struct ReframePicker: View {
                 Button { track = false } label: { Label("Fondo difuminado", systemImage: "square.on.square").frame(maxWidth: .infinity) }
                     .font(.footnote).padding(.vertical, 9)
                     .foregroundStyle(!track ? .white : Theme.muted).background(!track ? Theme.accent : Theme.bg2)
-            }.overlay(Rectangle().strokeBorder(Theme.line))
+            }.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             Text(track ? "Una cámara virtual sigue la cara de quien habla, sin temblores, y llena toda la pantalla."
                        : "El video entero queda al centro con el fondo difuminado.")
                 .font(.caption).foregroundStyle(Theme.muted)

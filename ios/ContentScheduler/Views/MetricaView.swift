@@ -76,12 +76,12 @@ struct MetricaView: View {
                         .background(network == n ? Theme.accent : Theme.bg2)
                     }.buttonStyle(.plain)
                 }
-            }.overlay(Rectangle().strokeBorder(Theme.line))
+            }.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             HStack(spacing: 0) {
                 seg("Detalle", !compare) { compare = false }.frame(maxWidth: .infinity)
                 seg("Comparar", compare) { compare = true }.frame(maxWidth: .infinity)
-            }.overlay(Rectangle().strokeBorder(Theme.line))
+            }.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             Toggle(isOn: $auto) {
                 Label("Actualizar solo cada 3 min", systemImage: "clock.arrow.2.circlepath").font(.footnote)
             }
@@ -89,7 +89,7 @@ struct MetricaView: View {
             if network == .youtube { YTAccountPicker() }
             if network == .youtube && youtube.isConnected && NIM.isConfigured {
                 Box {
-                    Text("IDEAS DE CONTENIDO").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                    Text("IDEAS DE CONTENIDO").font(Theme.mono).foregroundStyle(Theme.muted)
                     Text("La IA mira qué videos tuyos funcionaron mejor y te propone qué grabar.").font(.caption).foregroundStyle(Theme.muted)
                     Button {
                         thinking = true
@@ -149,15 +149,15 @@ struct MetricaView: View {
                      "me gusta + comentarios / vistas")
             }.fixedSize(horizontal: false, vertical: true)
         }
-        .background(Theme.bg2).overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.line))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .background(Theme.bg2).overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Theme.line))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
         Box {
             Text("CRECIMIENTO").font(Theme.display(22)).foregroundStyle(Theme.fg)
             Text("Una foto por día de esta cuenta").font(.footnote).foregroundStyle(Theme.muted)
             HStack(spacing: 0) {
                 ForEach(Metric.allCases, id: \.self) { m in seg(m.rawValue, metric == m) { metric = m } }
-            }.overlay(Rectangle().strokeBorder(Theme.line))
+            }.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             let points = network == .youtube && connected ? youtube.snapshots : []
             if points.count < 2 {
                 Text("—").font(.title).foregroundStyle(Theme.fg)

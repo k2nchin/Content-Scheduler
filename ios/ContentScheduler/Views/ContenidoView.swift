@@ -53,14 +53,14 @@ struct ContenidoView: View {
                     Spacer()
                     Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
                 }
-                .padding(16).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+                .padding(16).background(Theme.bg2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }.buttonStyle(.plain)
 
             HStack {
                 Text("EN COLA").font(Theme.display(26)).foregroundStyle(Theme.fg)
                 Spacer()
                 Button { grid.toggle() } label: { Image(systemName: grid ? "list.bullet" : "square.grid.2x2").padding(10) }
-                    .overlay(Rectangle().strokeBorder(Theme.line)).foregroundStyle(Theme.fg)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous)).foregroundStyle(Theme.fg)
             }.padding(.top, 14)
             HStack(spacing: 0) {
                 ForEach(Filter.allCases, id: \.self) { f in
@@ -70,7 +70,7 @@ struct ContenidoView: View {
                         .foregroundStyle(filter == f ? .white : Theme.muted)
                         .background(filter == f ? Theme.accent : Theme.bg2)
                 }
-            }.overlay(Rectangle().strokeBorder(Theme.line))
+            }.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             HStack(spacing: 10) {
                 Button { store.reorganize() } label: { Label("Reorganizar", systemImage: "arrow.triangle.2.circlepath").frame(maxWidth: .infinity) }
                     .buttonStyle(BoxButtonStyle())
@@ -125,7 +125,7 @@ struct ContenidoView: View {
             Text("\(n)").font(Theme.display(30)).foregroundStyle(Theme.fg)
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+        .background(Theme.bg2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var clientsBox: some View {
@@ -215,12 +215,12 @@ struct ContenidoView: View {
             if importing { ProgressView("Preparando videos…") }
             PhotosPicker(selection: $picks, maxSelectionCount: 20, matching: .videos) {
                 Text("Elegir archivos").font(.system(size: 12.5, weight: .bold)).tracking(1.2).textCase(.uppercase)
-                    .padding(.horizontal, 16).padding(.vertical, 12).foregroundStyle(Theme.fg)
-                    .overlay(Rectangle().strokeBorder(Theme.fg.opacity(0.85), lineWidth: 1.2))
+                    .padding(.horizontal, 16).padding(.vertical, 12).foregroundStyle(.white)
+                    .background(Theme.accent, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
         .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(Rectangle().strokeBorder(Theme.accent.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, dash: [5])))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.accent.opacity(0.5), style: StrokeStyle(lineWidth: 1.5, dash: [6])))
     }
 
     private func importVideos(_ items: [PhotosPickerItem], at time: Date?) {
@@ -274,7 +274,7 @@ struct QueueCard: View {
                 Thumb(post: post, width: 160).frame(maxWidth: .infinity).frame(height: 130).clipped()
                 Text(post.date.formatted(.dateTime.weekday(.abbreviated).day().hour().minute().locale(Locale(identifier: "es"))))
                     .font(.caption2.bold()).padding(.horizontal, 7).padding(.vertical, 4)
-                    .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 5)).padding(6)
+                    .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 5, style: .continuous)).padding(6)
             }
             .overlay(alignment: .bottomLeading) {
                 Text(label.uppercased()).font(.system(size: 10, weight: .bold, design: .monospaced)).tracking(1.5)
@@ -295,7 +295,7 @@ struct QueueCard: View {
                 }
             }
         }
-        .padding(8).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+        .padding(8).background(Theme.bg2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
     private var label: String {
         if post.yt?.state == .uploading { return "Subiendo \(Int((post.yt?.progress ?? 0) * 100))%" }

@@ -33,27 +33,24 @@ struct ScreenTitle: View {
 struct SectionLabel: View {
     let text: String
     var body: some View {
-        Text(text.uppercased()).font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
-            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 18)
+        Text(text.uppercased()).font(.footnote).foregroundStyle(Theme.muted)
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 18).padding(.horizontal, 4)
     }
 }
-
 struct DemoBanner: View {
     let text: String
     var icon = "info.circle"
     var color = Theme.warn
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon).foregroundStyle(color)
-            Text(text).font(.footnote).foregroundStyle(color.opacity(0.9))
+            Image(systemName: icon).foregroundStyle(color).font(.body.weight(.semibold))
+            Text(text).font(.footnote).foregroundStyle(Theme.fg)
             Spacer(minLength: 0)
         }
-        .padding(12)
-        .background(color.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [4])))
+        .padding(14)
+        .background(color.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
     }
 }
-
 struct NetBadge: View {
     let network: Network
     var size: CGFloat = 22
@@ -85,7 +82,7 @@ struct StatusPill: View {
             .font(.system(size: 9.5, weight: .medium, design: .monospaced)).tracking(0.8)
             .foregroundStyle(status.color)
             .padding(.horizontal, 7).padding(.vertical, 4)
-            .background(status.color.opacity(0.13), in: RoundedRectangle(cornerRadius: 6))
+            .background(status.color.opacity(0.13), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 
@@ -101,10 +98,10 @@ struct Thumb: View {
             }
             Text(post.durationText).font(.system(size: 9.5, weight: .medium, design: .monospaced))
                 .padding(.horizontal, 4).padding(.vertical, 1)
-                .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 4)).padding(4)
+                .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 4, style: .continuous)).padding(4)
         }
         .frame(width: width, height: width * 1.36)
-        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 }
 
@@ -119,7 +116,7 @@ struct YTTag: View {
         }
         Text(text).font(.system(size: 10, weight: .medium, design: .monospaced))
             .foregroundStyle(color).padding(.horizontal, 6).padding(.vertical, 4)
-            .background(color.opacity(0.13), in: RoundedRectangle(cornerRadius: 6))
+            .background(color.opacity(0.13), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 
@@ -141,37 +138,33 @@ struct PostRow: View {
             StatusPill(status: post.status)
         }
         .padding(10)
-        .background(Theme.bg2, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.line))
+        .background(Theme.bg2, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
 struct Card<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) { content }
-            .padding(14)
+        VStack(alignment: .leading, spacing: 12) { content }
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.bg2, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.line))
+            .background(Theme.bg2, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
     }
 }
-
 struct PrimaryButtonStyle: ButtonStyle {
     var filled = true
     var color = Theme.accent
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 13, weight: .bold)).textCase(.uppercase).tracking(0.8)
-            .frame(maxWidth: .infinity).padding(.vertical, 14)
+            .font(.body.weight(.semibold))
+            .frame(maxWidth: .infinity).padding(.vertical, 15)
             .foregroundStyle(filled ? .white : color)
-            .background(filled ? color : .clear, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(filled ? .clear : Theme.line))
-            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .background(filled ? color : color.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+            .opacity(configuration.isPressed ? 0.75 : 1)
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.spring(duration: 0.2), value: configuration.isPressed)
     }
 }
-
-/// Fondo oscuro y desplazamiento comunes a cada pantalla.
 struct Screen<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
@@ -186,41 +179,24 @@ struct Screen<Content: View>: View {
 
 // MARK: Estructura de tu app (encabezado, título de página, barra inferior)
 
+/// En estilo Apple no hay cabecera de marca: el título grande de cada pantalla hace ese papel.
 struct AppHeader: View {
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "play.fill").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(Theme.accent, in: RoundedRectangle(cornerRadius: 7))
-                .shadow(color: Theme.accent.opacity(0.45), radius: 8)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("CONTENT SCHEDULER").font(Theme.display(17)).tracking(0.8).foregroundStyle(Theme.fg)
-                Text("ESTUDIO DE PUBLICACIÓN").font(.system(size: 9, weight: .medium, design: .monospaced)).tracking(1.5).foregroundStyle(Theme.muted)
-            }
-            Spacer()
-        }
-        .padding(.bottom, 4)
-    }
+    var body: some View { EmptyView() }
 }
-
+/// Título grande como en las apps de Apple (Fotos, Salud, Ajustes).
 struct PageTitle: View {
     let kicker: String
     let title: String
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Circle().fill(Theme.accent).frame(width: 7, height: 7)
-                Text(kicker.uppercased()).font(.system(size: 11, weight: .medium, design: .monospaced)).tracking(2).foregroundStyle(Theme.accent).lineLimit(1)
-            }
-            (Text(title.uppercased()).foregroundStyle(Theme.fg) + Text(".").foregroundStyle(Theme.accent))
-                .font(Theme.display(42))
-                .lineLimit(1).minimumScaleFactor(0.6)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(kicker.capitalized(with: Locale(identifier: "es"))).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.accent).lineLimit(1)
+            Text(title.capitalized(with: Locale(identifier: "es"))).font(.largeTitle.bold()).foregroundStyle(Theme.fg)
+                .lineLimit(1).minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 6).padding(.bottom, 2)
+        .padding(.top, 8).padding(.bottom, 4)
     }
 }
-
 enum AppTab: String, CaseIterable, Identifiable {
     case contenido, clipper, horarios, metrica, comentarios, ajustes
     var id: String { rawValue }
@@ -238,65 +214,64 @@ enum AppTab: String, CaseIterable, Identifiable {
         switch self {
         case .contenido: "square.grid.2x2"
         case .clipper: "scissors"
-        case .horarios: "clock.arrow.circlepath"
-        case .metrica: "chart.bar"
-        case .comentarios: "bubble.left"
-        case .ajustes: "slider.horizontal.3"
+        case .horarios: "calendar"
+        case .metrica: "chart.bar.xaxis"
+        case .comentarios: "bubble.left.and.bubble.right"
+        case .ajustes: "gearshape"
         }
     }
 }
 
+/// Barra de pestañas translúcida (vidrio esmerilado), íconos rellenos al seleccionar, como en iOS.
 struct BottomBar: View {
     @Binding var tab: AppTab
     var body: some View {
         HStack(spacing: 0) {
             ForEach(AppTab.allCases) { t in
-                Button { tab = t } label: {
-                    VStack(spacing: 5) {
-                        Image(systemName: t.icon).font(.system(size: 19))
-                            .frame(width: 48, height: 30)
-                            .background(tab == t ? Theme.accent.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 9))
-                            .foregroundStyle(tab == t ? Theme.accent : Theme.muted)
-                        Text(t.label).font(.system(size: 9.5, weight: tab == t ? .bold : .medium, design: .monospaced))
-                            .foregroundStyle(tab == t ? Theme.fg : Theme.muted)
-                    }.frame(maxWidth: .infinity)
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) { tab = t }
+                    UISelectionFeedbackGenerator().selectionChanged()
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: t.icon).symbolVariant(tab == t ? .fill : .none)
+                            .font(.system(size: 21, weight: .medium)).frame(height: 26)
+                        Text(t.label.capitalized(with: Locale(identifier: "es"))).font(.system(size: 10, weight: .medium))
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                    .foregroundStyle(tab == t ? Theme.accent : Theme.muted)
+                    .frame(maxWidth: .infinity)
                 }.buttonStyle(.plain)
             }
         }
-        .padding(.top, 10).padding(.bottom, 4)
-        .background(Theme.bg2.opacity(0.97))
-        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+        .padding(.top, 8).padding(.bottom, 2)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
     }
 }
-
-/// Botón rectangular como los de tu app (Publicar ahora, Reporte…).
+/// Botón secundario redondeado (como .bordered de iOS).
 struct BoxButtonStyle: ButtonStyle {
     var filled = false
     var color = Theme.accent
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 12.5, weight: .bold)).textCase(.uppercase).tracking(1.2)
-            .lineLimit(1).minimumScaleFactor(0.7)
-            .padding(.horizontal, 12).padding(.vertical, 12)
-            .foregroundStyle(filled ? .white : (color == Theme.accent ? Theme.fg : color))
-            .background(filled ? color : .clear)
-            .overlay(Rectangle().strokeBorder(filled ? .clear : (color == Theme.accent ? Theme.fg.opacity(0.85) : color), lineWidth: 1.2))
+            .font(.subheadline.weight(.semibold))
+            .lineLimit(1).minimumScaleFactor(0.75)
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .foregroundStyle(filled ? .white : color)
+            .background(filled ? color : color.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
-
-/// Recuadro con borde recto como las tarjetas de tu app.
+/// Tarjeta agrupada con esquinas continuas, como las de Ajustes y Salud.
 struct Box<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) { content }
+        VStack(alignment: .leading, spacing: 12) { content }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.bg2)
-            .overlay(Rectangle().strokeBorder(Theme.line))
+            .background(Theme.bg2, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
     }
 }
-
 extension UUID: @retroactive Identifiable { public var id: UUID { self } }
 
 
@@ -319,7 +294,7 @@ struct YTAccountPicker: View {
                     Text("Cambiar").font(.caption).foregroundStyle(Theme.muted)
                     Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(Theme.muted)
                 }
-                .padding(12).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+                .padding(12).background(Theme.bg2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .foregroundStyle(Theme.fg)
         }

@@ -99,7 +99,7 @@ struct SettingsView: View {
                                 NetLogo(network: .instagram, size: 18)
                             }
                             .foregroundStyle(.white).padding(14)
-                            .background(Network.facebook.color, in: RoundedRectangle(cornerRadius: 10))
+                            .background(Network.facebook.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                         }.buttonStyle(.plain)
                         Text("Conecta tus páginas de Facebook y la cuenta profesional de Instagram vinculada a ellas.")
                             .font(.caption).foregroundStyle(Theme.muted)
@@ -128,10 +128,10 @@ struct SettingsView: View {
                     }
                     SecureField(nimSaved ? "Pega una clave nueva para cambiarla" : "Pega tu clave nvapi-…", text: $nimKey)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .padding(10).background(Theme.bg3)
+                        .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     TextField("Modelo (vacío = automático: el mejor para cada tarea)", text: $nimModel)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().font(.footnote)
-                        .padding(10).background(Theme.bg3)
+                        .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     HStack(spacing: 10) {
                         Button("Guardar") {
                             let k = nimKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -309,7 +309,6 @@ struct FlowSlots: View {
                     Button { remove(s) } label: { Image(systemName: "xmark").font(.caption2) }.foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, 10).padding(.vertical, 7)
-                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.line))
             }
         }
     }

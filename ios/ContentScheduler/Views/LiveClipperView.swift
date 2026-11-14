@@ -187,7 +187,7 @@ struct LiveClipperView: View {
                         Text("Graba en partes de 3 min. Al cerrar cada parte, los momentos marcados se vuelven clips y van a la cola mientras sigues grabando.")
                             .font(.caption2).foregroundStyle(.white.opacity(0.75))
                     }
-                    .padding(12).background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
+                    .padding(12).background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .foregroundStyle(.white).tint(Theme.accent)
                 }
             }

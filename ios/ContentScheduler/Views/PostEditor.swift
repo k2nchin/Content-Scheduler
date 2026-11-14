@@ -41,13 +41,13 @@ struct PostEditor: View {
                             Text("Título").font(.caption).foregroundStyle(Theme.muted)
                             TextField("Título", text: $title, axis: .vertical)
                                 .lineLimit(3...4).padding(12)
-                                .background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
+                                .background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                                 .onChange(of: title) { _, v in if v.count > 100 { title = String(v.prefix(100)) } }
                         }
                     }
                     Text("Hashtags").font(.caption).foregroundStyle(Theme.muted).padding(.top, 6)
                     TextField("#musica #envivo", text: $tags).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
+                        .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     if NIM.isConfigured {
                         Button { Task { await writeWithAI() } } label: {
                             Label(aiWriting ? "Escuchando el video y escribiendo…" : "✨ Escribir título, textos y hashtags con IA", systemImage: "wand.and.stars")
@@ -94,7 +94,7 @@ struct PostEditor: View {
                                     NetBadge(network: n).padding(.top, 10)
                                     TextField(n == .youtube ? "Título para YouTube (máx. 100)" : "Texto para \(n.name)",
                                               text: Binding(get: { custom[n.rawValue] ?? "" }, set: { custom[n.rawValue] = $0 }), axis: .vertical)
-                                        .lineLimit(1...4).padding(10).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
+                                        .lineLimit(1...4).padding(10).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                                 }
                             }
                             Text("Si lo dejas vacío, se usa el título general.").font(.caption).foregroundStyle(Theme.muted)
@@ -105,7 +105,7 @@ struct PostEditor: View {
 
                     Text("Primer comentario (opcional)").font(.caption).foregroundStyle(Theme.muted).padding(.top, 6)
                     TextField("Se pone solo al publicarse: un link, más hashtags…", text: $firstComment, axis: .vertical)
-                        .lineLimit(1...3).padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
+                        .lineLimit(1...3).padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                     Text("Redes").font(.caption).foregroundStyle(Theme.muted).padding(.top, 6)
                     HStack(spacing: 8) {
@@ -119,8 +119,8 @@ struct PostEditor: View {
                                     Text(n.name).font(.system(size: 11)).foregroundStyle(on ? Theme.fg : Theme.muted)
                                 }
                                 .frame(maxWidth: .infinity).padding(.vertical, 10)
-                                .background(on ? Theme.bg3 : .clear, in: RoundedRectangle(cornerRadius: 10))
-                                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(on ? Theme.fg : Theme.line))
+                                .background(on ? Theme.bg3 : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(on ? Theme.fg : Theme.line))
                             }.buttonStyle(.plain)
                         }
                     }

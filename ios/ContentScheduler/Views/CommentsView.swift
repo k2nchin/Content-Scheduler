@@ -65,7 +65,7 @@ struct CommentsView: View {
                         .background(network == n ? Theme.accent : Theme.bg2)
                     }.buttonStyle(.plain)
                 }
-            }.overlay(Rectangle().strokeBorder(Theme.line))
+            }.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             if network == .tiktok {
                 DemoBanner(text: "TikTok todavía no permite leer ni responder comentarios desde otras apps. Próximamente.", icon: "info.circle")
             } else if !netConnected {
@@ -107,11 +107,11 @@ struct CommentsView: View {
                             .font(.footnote).frame(maxWidth: .infinity).padding(.vertical, 10)
                             .foregroundStyle(show == s ? .white : Theme.muted).background(show == s ? Theme.accent : Theme.bg2)
                     }
-                }.overlay(Rectangle().strokeBorder(Theme.line))
+                }.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted)
                     TextField("Buscar comentario o persona", text: $search).textInputAutocapitalization(.never)
-                }.padding(10).background(Theme.bg3)
+                }.padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 if show == .pendientes && !pending.isEmpty {
                     Button { confirmAll = true } label: { Label("Responder a todos los pendientes", systemImage: "bubble.left.and.bubble.right").frame(maxWidth: .infinity) }
                         .buttonStyle(BoxButtonStyle())
@@ -127,7 +127,7 @@ struct CommentsView: View {
                         .buttonStyle(BoxButtonStyle()).disabled(summarizing)
                     if let summary {
                         Box {
-                            Text("RESUMEN").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                            Text("RESUMEN").font(Theme.mono).foregroundStyle(Theme.muted)
                             Text(summary).font(.footnote)
                         }
                     }
@@ -159,7 +159,7 @@ struct CommentsView: View {
             Text("\(n)").font(Theme.display(26)).foregroundStyle(Theme.fg)
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+        .background(Theme.bg2).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private func commentCard(_ c: YouTubeService.Comment) -> some View {
@@ -201,7 +201,7 @@ struct CommentsView: View {
                 }.scrollIndicators(.hidden)
                 HStack {
                     TextField("Escribe tu respuesta…", text: Binding(get: { drafts[c.id] ?? "" }, set: { drafts[c.id] = $0 }), axis: .vertical)
-                        .lineLimit(1...4).padding(10).background(Theme.bg3)
+                        .lineLimit(1...4).padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     Button { Task { await send(c, text: drafts[c.id] ?? "") } } label: {
                         if sending.contains(c.id) { ProgressView().frame(width: 42, height: 42) }
                         else { Image(systemName: "paperplane.fill").frame(width: 42, height: 42) }
@@ -323,7 +323,7 @@ struct RulesEditor: View {
 
     private func section(_ title: String, _ hint: String, _ text: Binding<String>, _ height: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title.uppercased()).font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+            Text(title.uppercased()).font(Theme.mono).foregroundStyle(Theme.muted)
             Text(hint).font(.caption).foregroundStyle(Theme.muted)
             TextEditor(text: text).scrollContentBackground(.hidden).frame(minHeight: height).padding(8).background(Theme.bg3)
         }
