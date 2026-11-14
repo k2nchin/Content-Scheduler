@@ -60,6 +60,8 @@ struct ClipperView: View {
                     clipsList
                     optionsBox
                     if working { HStack { ProgressView(); Text(status).font(.footnote) }.frame(maxWidth: .infinity) }
+                    Text("Los clips no se guardan en tu galería: se quedan en la app hasta subirse y luego se borran. «Guardar» estará disponible más adelante.")
+                        .font(.caption).foregroundStyle(Theme.muted)
                     Button { Task { await createClips() } } label: { Text(clips.isEmpty ? "Agrega clips primero" : "Crear \(clips.count) clips y mandar a la cola") }
                         .buttonStyle(PrimaryButtonStyle()).disabled(clips.isEmpty || working)
                 }
@@ -179,6 +181,9 @@ struct ClipperView: View {
                             Text("\(Int(c.end - c.start)) s" + (c.energy.map { " · energía \(Int($0 * 100))%" } ?? "")).font(.caption).foregroundStyle(Theme.muted)
                         }
                         Spacer()
+                        // Guardar en Fotos: suspendido por ahora (los clips no se guardan en el iPhone)
+                        Button { } label: { Label("Guardar", systemImage: "square.and.arrow.down").font(.caption.bold()) }
+                            .disabled(true).foregroundStyle(Theme.muted.opacity(0.5))
                         Button { clips.removeAll { $0.id == c.id } } label: { Image(systemName: "xmark") }.foregroundStyle(Theme.muted)
                     }
                     .padding(10).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
