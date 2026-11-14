@@ -16,6 +16,7 @@ struct ContentSchedulerApp: App {
                 .environment(store)
                 .environment(youtube)
                 .environment(meta)
+                .preferredColorScheme(.dark)
                 .tint(Theme.accent)
                 .task {
                     _ = await Notifier.requestPermission()
