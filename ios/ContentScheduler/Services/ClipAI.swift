@@ -20,7 +20,7 @@ enum ClipAI {
         let s = (Bundle.main.object(forInfoDictionaryKey: "ClipAIURL") as? String ?? "").trimmingCharacters(in: .whitespaces)
         return s.hasPrefix("https://") ? URL(string: s) : nil
     }
-    static var isConfigured: Bool { url != nil }
+    static var isConfigured: Bool { NIM.isConfigured || url != nil }
 
     /// Transcribe el video completo por partes de 50 s (el reconocimiento de voz trabaja mejor así).
     static func transcribe(_ source: URL, duration: Double, progress: (String) -> Void) async throws -> [StudioExport.Line] {

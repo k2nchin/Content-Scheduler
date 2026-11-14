@@ -61,7 +61,8 @@ struct ContentSchedulerApp: App {
         if AutoReply.enabled {
             for n in [Network.facebook, .instagram] where (n == .facebook ? meta.facebookConnected : meta.instagramConnected) {
                 if let list = try? await meta.comments(n) {
-                    let done = await AutoReply.run(list) { c, text in try await meta.reply(n, to: c.commentID, text: text) }
+                    let acc = n == .facebook ? meta.page?.name : meta.page?.igUsername
+                    let done = await AutoReply.run(list, network: n, account: acc) { c, text in try await meta.reply(n, to: c.commentID, text: text) }
                     if done > 0 { Notifier.send("Respuestas automáticas", "Respondí \(done) en \(n.name).") }
                 }
             }

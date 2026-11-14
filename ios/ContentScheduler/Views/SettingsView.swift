@@ -8,6 +8,11 @@ struct SettingsView: View {
     @State private var connectingYT = false
     @State private var connectingMeta = false
     @State private var connectingDrive = false
+    @State private var nimKey = ""
+    @State private var nimSaved = NIM.isConfigured
+    @State private var testingNIM = false
+    @AppStorage("nim.model") private var nimModel = ""
+    @AppStorage("cs.aiReplies") private var aiReplies = true
     @State private var drive = DriveService.shared
     @State private var closing: YTChannel?
     @State private var confirmMeta = false
@@ -107,6 +112,53 @@ struct SettingsView: View {
                             Text("Próximamente").font(.caption).foregroundStyle(Theme.muted)
                         }
                     }
+                }
+
+                SectionLabel(text: "IA (NVIDIA NIM)")
+                Card {
+                    HStack(spacing: 12) {
+                        Image(systemName: "sparkles").font(.title3).foregroundStyle(Theme.accent).frame(width: 32)
+                        VStack(alignment: .leading) {
+                            Text(nimSaved ? "Clave guardada" : "Sin clave").bold()
+                            Text("La IA elige tus mejores clips y responde comentarios.").font(.caption).foregroundStyle(Theme.muted)
+                        }
+                        Spacer()
+                        if nimSaved { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.ok).font(.title3) }
+                    }
+                    SecureField(nimSaved ? "Pega una clave nueva para cambiarla" : "Pega tu clave nvapi-…", text: $nimKey)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .padding(10).background(Theme.bg3)
+                    TextField("Modelo (vacío = \(NIM.defaultModel))", text: $nimModel)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled().font(.footnote)
+                        .padding(10).background(Theme.bg3)
+                    HStack(spacing: 10) {
+                        Button("Guardar") {
+                            let k = nimKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !k.isEmpty else { return }
+                            NIM.save(key: k); nimKey = ""; nimSaved = true
+                            store.show("Clave de NVIDIA guardada en el Llavero del iPhone")
+                        }.buttonStyle(BoxButtonStyle(filled: true)).disabled(nimKey.isEmpty)
+                        Button(testingNIM ? "Probando…" : "Probar") {
+                            testingNIM = true
+                            Task {
+                                do { _ = try await NIM.test(); store.show("La IA de NVIDIA funciona ✓") } catch { store.show(error.localizedDescription) }
+                                testingNIM = false
+                            }
+                        }.buttonStyle(BoxButtonStyle()).disabled(!nimSaved || testingNIM)
+                        if nimSaved {
+                            Button("Borrar") { NIM.save(key: ""); nimSaved = false; store.show("Clave borrada") }
+                                .buttonStyle(BoxButtonStyle(color: Theme.red))
+                        }
+                    }
+                    Divider().overlay(Theme.line)
+                    Toggle(isOn: $aiReplies) {
+                        VStack(alignment: .leading) {
+                            Text("Responder comentarios con IA").bold()
+                            Text("La respuesta automática usa la IA; tus reglas por palabra van primero.").font(.caption).foregroundStyle(Theme.muted)
+                        }
+                    }.disabled(!nimSaved)
+                    Text("Consigue tu clave en build.nvidia.com → API Keys. Se guarda solo en este iPhone (Llavero de iOS), no va dentro de la app ni a otro servidor.")
+                        .font(.caption).foregroundStyle(Theme.muted)
                 }
 
                 SectionLabel(text: "Almacenamiento en la nube")

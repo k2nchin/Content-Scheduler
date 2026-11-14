@@ -29,6 +29,7 @@ struct CommentsView: View {
     @State private var search = ""
     @State private var loading = false
     @State private var sending: Set<String> = []
+    @State private var suggesting: Set<String> = []
     @State private var editing = false
     @State private var confirmAll = false
 
@@ -74,7 +75,9 @@ struct CommentsView: View {
                     Toggle(isOn: $autoReply) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Respuesta automática").bold()
-                            Text("Responde sola a los pendientes al abrir la app y en segundo plano, con tus reglas y respuestas rápidas (máx. 15 cada vez).")
+                            Text(NIM.isConfigured && AutoReply.useAI
+                                 ? "Responde sola con IA (NVIDIA NIM) a los pendientes al abrir la app y en segundo plano. Tus reglas por palabra van primero (máx. 15 cada vez)."
+                                 : "Responde sola a los pendientes al abrir la app y en segundo plano, con tus reglas y respuestas rápidas (máx. 15 cada vez).")
                                 .font(.caption).foregroundStyle(Theme.muted)
                         }
                     }
@@ -159,7 +162,9 @@ struct CommentsView: View {
             } else {
                 ScrollView(.horizontal) {
                     HStack(spacing: 6) {
-                        if let auto = AutoReply.reply(for: c) {
+                        if NIM.isConfigured {
+                            chip(suggesting.contains(c.id) ? "✨ Pensando…" : "✨ Responder con IA") { Task { await suggestAI(c) } }
+                        } else if let auto = AutoReply.reply(for: c) {
                             chip("✨ " + auto) { drafts[c.id] = auto }
                         }
                         ForEach(templates, id: \.self) { t in chip(AutoReply.fill(t, c)) { drafts[c.id] = AutoReply.fill(t, c) } }
@@ -200,7 +205,7 @@ struct CommentsView: View {
 
     private func runAuto() async {
         let net = network
-        let n = await AutoReply.run(comments) { c, text in try await sendReply(net, c, text) }
+        let n = await AutoReply.run(comments, network: net, account: accountName) { c, text in try await sendReply(net, c, text) }
         if n > 0 {
             for i in comments.indices where AutoReply.answered.contains(comments[i].id) { comments[i].replied = true }
             store.show("\(n) \(n == 1 ? "comentario respondido" : "comentarios respondidos")")
@@ -220,6 +225,24 @@ struct CommentsView: View {
         } catch {
             store.show(error.localizedDescription)
         }
+    }
+
+    private var accountName: String? {
+        switch network {
+        case .youtube: youtube.channel?.title
+        case .facebook: meta.page?.name
+        case .instagram: meta.page?.igUsername
+        case .tiktok: nil
+        }
+    }
+
+    private func suggestAI(_ c: YouTubeService.Comment) async {
+        suggesting.insert(c.id)
+        defer { suggesting.remove(c.id) }
+        do {
+            if let text = try await NIM.reply(to: c.text, author: c.author, network: network, account: accountName) { drafts[c.id] = text }
+            else { store.show("La IA sugiere no responder este comentario (spam u ofensivo).") }
+        } catch { store.show(error.localizedDescription) }
     }
 
     private func sendReply(_ n: Network, _ c: YouTubeService.Comment, _ text: String) async throws {

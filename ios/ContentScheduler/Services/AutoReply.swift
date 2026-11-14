@@ -63,14 +63,31 @@ enum AutoReply {
     /// Responde a los pendientes. Devuelve cuántos respondió.
     @discardableResult
     static func run(_ comments: [YouTubeService.Comment], yt: YouTubeService, limit: Int = 15) async -> Int {
-        await run(comments, limit: limit) { c, text in try await yt.reply(to: c.commentID, text: text) }
+        await run(comments, limit: limit, network: .youtube, account: yt.channel?.title) { c, text in try await yt.reply(to: c.commentID, text: text) }
     }
 
     @discardableResult
-    static func run(_ comments: [YouTubeService.Comment], limit: Int = 15, send: (YouTubeService.Comment, String) async throws -> Void) async -> Int {
+    /// Responder con IA (NVIDIA NIM) cuando no aplica una regla por palabra.
+    static var useAI: Bool { d.object(forKey: "cs.aiReplies") as? Bool ?? true }
+
+    /// Regla por palabra → IA → respuesta rápida. nil = no responder.
+    static func smartReply(for c: YouTubeService.Comment, network: Network, account: String?) async -> String? {
+        if c.replied || answered.contains(c.id) { return nil }
+        if skipBlocked && isSpam(c) { return nil }
+        let t = c.text.lowercased()
+        if let rule = rules.first(where: { r in r.keys.contains { t.contains($0) } }) { return fill(rule.reply, c) }
+        if useAI && NIM.isConfigured {
+            if let ai = try? await NIM.reply(to: c.text, author: c.author, network: network, account: account) { return ai }
+            return nil   // la IA lo marcó como spam/insulto, o falló: mejor no responder a ciegas
+        }
+        return reply(for: c)
+    }
+
+    static func run(_ comments: [YouTubeService.Comment], limit: Int = 15, network: Network = .youtube, account: String? = nil,
+                    send: (YouTubeService.Comment, String) async throws -> Void) async -> Int {
         var done = 0
         for c in comments where done < limit {
-            guard let text = reply(for: c) else { continue }
+            guard let text = await smartReply(for: c, network: network, account: account) else { continue }
             do {
                 try await send(c, text)
                 answered.insert(c.id)

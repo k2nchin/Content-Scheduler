@@ -133,7 +133,7 @@ struct ClipperView: View {
             Text("La IA (NVIDIA NIM) lee lo que se dice en el video y elige los momentos con más potencial viral, con gancho, títulos por red y hashtags. El iPhone transcribe el audio; solo el texto va a la IA.")
                 .font(.caption).foregroundStyle(Theme.muted)
             if !ClipAI.isConfigured {
-                DemoBanner(text: "Falta conectar la IA: hay que poner la dirección de tu servidor (CLIP_AI_URL). Mientras tanto usa «Energía».", icon: "exclamationmark.triangle")
+                DemoBanner(text: "Falta conectar la IA: pon tu clave de NVIDIA en Ajustes → IA. Mientras tanto usa «Energía».", icon: "exclamationmark.triangle")
             }
             lengthPicker
             Stepper("Cuántos clips: \(count)", value: $count, in: 1...15).font(.footnote)
@@ -346,6 +346,13 @@ struct ClipperView: View {
                 if transcript.isEmpty { return store.show("No se entendió voz en el video. Usa «Energía» para videos sin diálogo.") }
             }
             status = "La IA está eligiendo los mejores momentos…"
+            if NIM.isConfigured {
+                let found = try await NIM.findClips(lines: transcript, duration: duration, count: count, length: length)
+                if found.isEmpty { return store.show("La IA no encontró momentos claros. Prueba con otra duración o con «Energía».") }
+                clips = found.map { Clip(start: $0.start, end: $0.end, energy: nil, ai: $0) }.sorted { $0.start < $1.start }
+                seek(clips[0].start)
+                return
+            }
             let token: String
             if youtube.isConnected { token = try await youtube.activeToken() }
             else if DriveService.shared.isConnected { token = try await DriveService.shared.accessToken() }
