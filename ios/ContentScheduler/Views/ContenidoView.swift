@@ -20,6 +20,7 @@ struct ContenidoView: View {
     @State private var confirmClear = false
     @State private var confirmPublish = false
     @State private var working = false
+    @State private var clipper = false
 
     var body: some View {
         Screen {
@@ -41,6 +42,19 @@ struct ContenidoView: View {
             clientsBox
             hoyBox
             addBox
+            Button { clipper = true } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "scissors").font(.title2).foregroundStyle(.white)
+                        .frame(width: 48, height: 48).background(Theme.accent)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Clipper").font(.title3).foregroundStyle(Theme.fg)
+                        Text("Saca varios clips de un video largo y mándalos a la cola.").font(.footnote).foregroundStyle(Theme.muted)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
+                }
+                .padding(16).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+            }.buttonStyle(.plain)
 
             HStack {
                 Text("EN COLA").font(Theme.display(26)).foregroundStyle(Theme.fg)
@@ -77,6 +91,7 @@ struct ContenidoView: View {
             }
         }
         .sheet(item: $editing) { PostEditor(postID: $0) }
+        .fullScreenCover(isPresented: $clipper) { ClipperView() }
         .onChange(of: picks) { _, items in importVideos(items, at: nil) }
         .onChange(of: slotPick) { _, item in
             guard let item, let t = slotTime else { return }
