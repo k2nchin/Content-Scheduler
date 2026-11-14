@@ -66,7 +66,6 @@ enum AutoReply {
         await run(comments, limit: limit, network: .youtube, account: yt.channel?.title) { c, text in try await yt.reply(to: c.commentID, text: text) }
     }
 
-    @discardableResult
     /// Responder con IA (NVIDIA NIM) cuando no aplica una regla por palabra.
     static var useAI: Bool { d.object(forKey: "cs.aiReplies") as? Bool ?? true }
 
@@ -83,6 +82,7 @@ enum AutoReply {
         return reply(for: c)
     }
 
+    @discardableResult
     static func run(_ comments: [YouTubeService.Comment], limit: Int = 15, network: Network = .youtube, account: String? = nil,
                     send: (YouTubeService.Comment, String) async throws -> Void) async -> Int {
         var done = 0
