@@ -12,6 +12,7 @@ struct PostEditor: View {
     @State private var tags = ""
     @State private var custom: [String: String] = [:]
     @State private var firstComment = ""
+    @State private var aiTags = false
     @State private var perNetwork = false
     @State private var studio = false
     @State private var networks: Set<Network> = []
@@ -45,6 +46,19 @@ struct PostEditor: View {
                     Text("Hashtags").font(.caption).foregroundStyle(Theme.muted).padding(.top, 6)
                     TextField("#musica #envivo", text: $tags).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
+                    if NIM.isConfigured {
+                        Button {
+                            aiTags = true
+                            Task {
+                                do {
+                                    let t = try await NIM.hashtags(title: title, networks: Array(networks))
+                                    if !t.isEmpty { tags = t.joined(separator: " ") }
+                                } catch { store.show(error.localizedDescription) }
+                                aiTags = false
+                            }
+                        } label: { Label(aiTags ? "Pensando hashtags…" : "✨ Hashtags con IA", systemImage: "number") }
+                            .font(.caption.bold()).foregroundStyle(Theme.accent).disabled(aiTags || title.isEmpty)
+                    }
                     ScrollView(.horizontal) {
                         HStack(spacing: 6) {
                             ForEach(groups, id: \.self) { g in

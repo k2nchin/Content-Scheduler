@@ -8,7 +8,7 @@ con puntaje de viralidad, gancho, títulos por red y hashtags. Solo acepta llama
 1. Vercel → **Add New → Project** → importa `k2nchin/Content-Scheduler`.
 2. En **Root Directory** elige `server`.
 3. En **Environment Variables** agrega `NVIDIA_API_KEY` con tu clave de NVIDIA (la misma que ya tienes en el otro proyecto).
-   Opcional: `NIM_MODEL` (por defecto `nvidia/nemotron-3-super-120b-a12b`, con respaldos).
+   Opcional: `NIM_MODEL` (por defecto `deepseek-ai/deepseek-v4.1-flash`, con respaldos).
 4. **Deploy**. La dirección queda como `https://<nombre>.vercel.app/api/clip-ai`.
 5. Pon esa dirección en `ios/Config.xcconfig` → `CLIP_AI_URL`.
 

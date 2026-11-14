@@ -6,13 +6,15 @@ enum NIM {
     static let endpoint = URL(string: "https://integrate.api.nvidia.com/v1/chat/completions")!
     /// Tareas de la app; cada una usa el modelo que mejor le va (con respaldos si alguno no está disponible).
     enum Job: String {
-        case clips, replies
+        case clips, replies, hashtags
         var models: [String] {
             switch self {
-            // Elegir clips: transcripciones largas, razonamiento y JSON exacto → modelo grande con contexto largo.
-            case .clips: ["nvidia/nemotron-3-super-120b-a12b", "nvidia/llama-3.1-nemotron-70b-instruct", "mistralai/mistral-large-2-instruct"]
-            // Responder comentarios: rápido, natural y bueno en español → modelo ligero.
-            case .replies: ["nvidia/nemotron-3.5-lightning-30b-a3b", "nv-mistralai/mistral-nemo-12b-instruct", "nvidia/llama-3.1-nemotron-70b-instruct"]
+            // Clipping: rápido y con contexto largo para leer toda la transcripción → modelos «flash».
+            case .clips: ["deepseek-ai/deepseek-v4.1-flash", "nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3-super-120b-a12b"]
+            // Comentarios: que suene a persona → modelo de escritura creativa, con respaldos naturales en español.
+            case .replies: ["writer/palmyra-creative-122b", "moonshotai/kimi-k2.6", "nv-mistralai/mistral-nemo-12b-instruct"]
+            // Hashtags y títulos: muy rápido y barato.
+            case .hashtags: ["z-ai/glm-5.3-flash", "nvidia/nemotron-3.5-lightning-30b-a3b", "nv-mistralai/mistral-nemo-12b-instruct"]
             }
         }
     }
@@ -111,7 +113,9 @@ enum NIM {
         let name = author.trimmingCharacters(in: CharacterSet(charactersIn: "@")).split(separator: " ").first.map(String.init) ?? ""
         let system = """
         Eres el community manager de \(account ?? "un creador de contenido") en \(network.name).
-        Escribe UNA respuesta breve (máximo 2 frases) al comentario de un seguidor: cálida, natural y en el mismo idioma del comentario.
+        Escribe UNA respuesta breve (máximo 2 frases) al comentario de un seguidor, como la escribiría una persona real desde su celular:
+        natural, cálida, espontánea, en el mismo idioma y con el mismo tono del comentario (si es en jerga o informal, responde igual).
+        Nada de frases de robot ni de servicio al cliente («¡Gracias por tu comentario!», «Apreciamos tu apoyo»). Varía siempre la forma de empezar.
         Puedes usar el nombre «\(name)» si queda natural y como mucho 1 emoji. Sin hashtags, sin links, sin inventar datos (fechas, precios, lanzamientos).
         Si te preguntan algo que no sabes, invita a estar pendiente o a escribir por mensaje directo.
         Si el comentario es spam, un insulto, odio o no tiene sentido, responde exactamente: SKIP
@@ -121,6 +125,24 @@ enum NIM {
             .trimmingCharacters(in: CharacterSet(charactersIn: "\"“”").union(.whitespacesAndNewlines))
         if text.isEmpty || text.uppercased().hasPrefix("SKIP") { return nil }
         return String(text.prefix(500))
+    }
+
+    // MARK: Hashtags
+
+    /// Hashtags para un post según su título y las redes donde va.
+    static func hashtags(title: String, networks: [Network]) async throws -> [String] {
+        let nets = networks.map(\.name).joined(separator: ", ")
+        let system = """
+        Eres experto en crecimiento en redes (\(nets)). Para el video descrito, propone entre 8 y 12 hashtags que de verdad se usan:
+        mezcla 2-3 amplios, 4-6 de nicho y 2-3 específicos del tema. En el idioma del título. Sin espacios dentro de cada hashtag.
+        Responde SOLO con los hashtags separados por espacios, sin texto extra.
+        """
+        let raw = try await chat(.hashtags, system: system, user: title, maxTokens: 400, temperature: 0.5)
+        var seen = Set<String>()
+        return raw.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "," })
+            .map { "#" + $0.replacingOccurrences(of: "#", with: "").trimmingCharacters(in: .punctuationCharacters) }
+            .filter { $0.count > 2 && seen.insert($0.lowercased()).inserted }
+            .prefix(12).map { $0 }
     }
 
     // MARK: Clipper

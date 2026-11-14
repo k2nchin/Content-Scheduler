@@ -1,14 +1,14 @@
 // Content Scheduler · Clipper con IA (NVIDIA NIM): recibe la transcripción con tiempos y devuelve los mejores clips,
 // con puntaje de viralidad, gancho, títulos por red y hashtags.
 // La clave va en Vercel como NVIDIA_API_KEY (también se aceptan NIM_API_KEY o NVIDIA_NIM_API_KEY).
-// Modelo opcional: NIM_MODEL. Por defecto nemotron-3-super-120b, con respaldos si no está disponible.
+// Modelo opcional: NIM_MODEL. Por defecto deepseek-v4.1-flash (rápido), con respaldos.
 
 const CLIENT_IDS = [
   '84783551840-mki8tk5nse0mh4idh09f88gi8csf59f1.apps.googleusercontent.com',  // iOS (Content Scheduler)
 ];
 const KEY = process.env.NVIDIA_API_KEY || process.env.NIM_API_KEY || process.env.NVIDIA_NIM_API_KEY;
 const MODELS = process.env.NIM_MODEL ? [process.env.NIM_MODEL]
-  : ['nvidia/nemotron-3-super-120b-a12b', 'nvidia/llama-3.1-nemotron-70b-instruct', 'mistralai/mistral-large-2-instruct'];
+  : ['deepseek-ai/deepseek-v4.1-flash', 'nvidia/nemotron-3.5-lightning-30b-a3b', 'nvidia/nemotron-3-super-120b-a12b'];
 const MODEL = MODELS[0];
 const recent = new Map();
 
