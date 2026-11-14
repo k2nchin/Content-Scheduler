@@ -8,3 +8,6 @@ META_APP_ID = 1611404507348655
 
 // Dirección de la IA del Clipper (función /api/clip-ai de tu ViralCut en Vercel), por ejemplo https://tuapp.vercel.app/api/clip-ai
 CLIP_AI_URL = 
+
+// Clave de NVIDIA metida en la app al compilar (viene del Secret NIM_API_KEY de GitHub; aquí siempre vacía).
+NIM_EMBEDDED_KEY = 

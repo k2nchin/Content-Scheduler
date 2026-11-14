@@ -9,7 +9,7 @@ struct SettingsView: View {
     @State private var connectingMeta = false
     @State private var connectingDrive = false
     @State private var nimKey = ""
-    @State private var nimSaved = NIM.isConfigured
+    @State private var nimSaved = Keychain.get("nim.key") != nil
     @State private var testingNIM = false
     @AppStorage("nim.model") private var nimModel = ""
     @AppStorage("cs.aiReplies") private var aiReplies = true
@@ -119,11 +119,11 @@ struct SettingsView: View {
                     HStack(spacing: 12) {
                         Image(systemName: "sparkles").font(.title3).foregroundStyle(Theme.accent).frame(width: 32)
                         VStack(alignment: .leading) {
-                            Text(nimSaved ? "Clave guardada" : "Sin clave").bold()
+                            Text(nimSaved ? "Clave guardada" : NIM.embeddedKey != nil ? "Clave incluida en la app" : "Sin clave").bold()
                             Text("La IA elige tus mejores clips y responde comentarios.").font(.caption).foregroundStyle(Theme.muted)
                         }
                         Spacer()
-                        if nimSaved { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.ok).font(.title3) }
+                        if NIM.isConfigured { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.ok).font(.title3) }
                     }
                     SecureField(nimSaved ? "Pega una clave nueva para cambiarla" : "Pega tu clave nvapi-…", text: $nimKey)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -144,7 +144,7 @@ struct SettingsView: View {
                                 do { _ = try await NIM.test(); store.show("La IA de NVIDIA funciona ✓") } catch { store.show(error.localizedDescription) }
                                 testingNIM = false
                             }
-                        }.buttonStyle(BoxButtonStyle()).disabled(!nimSaved || testingNIM)
+                        }.buttonStyle(BoxButtonStyle()).disabled(!NIM.isConfigured || testingNIM)
                         if nimSaved {
                             Button("Borrar") { NIM.save(key: ""); nimSaved = false; store.show("Clave borrada") }
                                 .buttonStyle(BoxButtonStyle(color: Theme.red))
@@ -156,7 +156,7 @@ struct SettingsView: View {
                             Text("Responder comentarios con IA").bold()
                             Text("La respuesta automática usa la IA; tus reglas por palabra van primero.").font(.caption).foregroundStyle(Theme.muted)
                         }
-                    }.disabled(!nimSaved)
+                    }.disabled(!NIM.isConfigured)
                     Text("Consigue tu clave en build.nvidia.com → API Keys. Se guarda solo en este iPhone (Llavero de iOS), no va dentro de la app ni a otro servidor.")
                         .font(.caption).foregroundStyle(Theme.muted)
                 }

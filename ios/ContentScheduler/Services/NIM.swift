@@ -6,9 +6,16 @@ enum NIM {
     static let endpoint = URL(string: "https://integrate.api.nvidia.com/v1/chat/completions")!
     static let defaultModel = "meta/llama-3.3-70b-instruct"
 
+    /// Clave incluida al compilar (Secret NIM_API_KEY en GitHub). Solo para uso personal.
+    static var embeddedKey: String? {
+        let k = (Bundle.main.object(forInfoDictionaryKey: "NIMEmbeddedKey") as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return k.hasPrefix("nvapi-") ? k : nil
+    }
+
+    /// Primero la clave puesta en Ajustes (Llavero); si no hay, la incluida en la app.
     static var key: String? {
         let k = Keychain.get("nim.key")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return k.isEmpty ? nil : k
+        return k.isEmpty ? embeddedKey : k
     }
     static var model: String {
         let m = UserDefaults.standard.string(forKey: "nim.model")?.trimmingCharacters(in: .whitespaces) ?? ""

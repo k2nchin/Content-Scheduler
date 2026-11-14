@@ -15,6 +15,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Instalar XcodeGen
         run: brew install xcodegen
+      - name: Incluir la clave de NVIDIA (Secret NIM_API_KEY, si existe)
+        env:
+          NIM: ${{ secrets.NIM_API_KEY }}
+        run: |
+          if [ -n "$NIM" ]; then
+            printf '\nNIM_EMBEDDED_KEY = %s\n' "$NIM" >> ios/Config.xcconfig
+            echo "Clave de NVIDIA incluida."
+          else
+            echo "Sin Secret NIM_API_KEY: la clave se pone en Ajustes de la app."
+          fi
       - name: Generar proyecto de Xcode
         working-directory: ios
         run: xcodegen generate
