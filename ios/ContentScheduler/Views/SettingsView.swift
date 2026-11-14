@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var testingNIM = false
     @AppStorage("nim.model") private var nimModel = ""
     @AppStorage("cs.aiReplies") private var aiReplies = true
+    @AppStorage("nim.tone") private var tone = "dominicano"
     @State private var drive = DriveService.shared
     @State private var closing: YTChannel?
     @State private var confirmMeta = false
@@ -157,6 +158,10 @@ struct SettingsView: View {
                             Text("La respuesta automática usa la IA; tus reglas por palabra van primero.").font(.caption).foregroundStyle(Theme.muted)
                         }
                     }.disabled(!NIM.isConfigured)
+                    Picker("Tono de las respuestas", selection: $tone) {
+                        Text("Dominicano 🇩🇴").tag("dominicano")
+                        Text("Neutro").tag("neutro")
+                    }.font(.footnote)
                     Text("Consigue tu clave en build.nvidia.com → API Keys. Se guarda solo en este iPhone (Llavero de iOS), no va dentro de la app ni a otro servidor.")
                         .font(.caption).foregroundStyle(Theme.muted)
                 }
