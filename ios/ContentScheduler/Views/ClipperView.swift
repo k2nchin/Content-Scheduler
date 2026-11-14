@@ -27,7 +27,7 @@ struct ClipperView: View {
     @State private var levels: [Float] = []   // volumen por cada medio segundo
 
     @State private var vertical = true
-    @State private var subtitles = false
+    @State private var subtitles = true
     @State private var working = false
     @State private var status = ""
 
