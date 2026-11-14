@@ -176,7 +176,7 @@ final class TwitchService: NSObject {
         let r = try await helix("GET", "clips/downloads?editor_id=\(me)&broadcaster_id=\(clip.broadcasterID)&clip_id=\(clip.id)")
         let d = (r["data"] as? [[String: Any]])?.first
         guard let s = (d?["landscape_download_url"] as? String) ?? (d?["portrait_download_url"] as? String), let url = URL(string: s) else {
-            throw YTError(message: "Twitch solo deja bajar clips de tu canal o de canales donde eres editor.")
+            throw YTError(message: "No tienes permiso para bajar clips de este canal. Pídele al streamer que te haga «Editor» en Twitch (Panel de control → Comunidad → Roles).")
         }
         let (tmp, _) = try await URLSession.shared.download(from: url)
         let dest = AppStore.videosDir.appendingPathComponent("twitch-\(clip.id).mp4")

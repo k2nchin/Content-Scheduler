@@ -96,14 +96,12 @@ struct TwitchView: View {
                         HStack(spacing: 14) {
                             if let u = c.url.flatMap(URL.init) { Link("Ver en Twitch", destination: u).font(.caption.bold()) }
                             else { Button("Actualizar") { Task { await twitch.refreshDetails(c.id) } }.font(.caption.bold()) }
-                            if c.broadcasterID == twitch.userID {
-                                Button(converting.contains(c.id) ? "Creando…" : "A la cola en 9:16") { Task { await toQueue(c) } }
-                                    .font(.caption.bold()).foregroundStyle(Theme.accent).disabled(converting.contains(c.id))
-                            }
+                            Button(converting.contains(c.id) ? "Creando…" : "A la cola en 9:16") { Task { await toQueue(c) } }
+                                .font(.caption.bold()).foregroundStyle(Theme.accent).disabled(converting.contains(c.id))
                         }
                     }
                 }
-                Text("Solo los clips de tu canal se pueden bajar y publicar: Twitch no deja bajar clips de otros canales.")
+                Text("Twitch deja bajar los clips de tu canal y de los canales donde el streamer te hizo «Editor». Para clipear a otros streamers, pídeles ese rol (Panel de control → Comunidad → Roles).")
                     .font(.caption2).foregroundStyle(Theme.muted)
             }
         }
