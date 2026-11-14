@@ -19,7 +19,7 @@ struct CommentsView: View {
     @AppStorage("cs.replyRules") private var rulesRaw = AutoReply.defaultRules
     @AppStorage("cs.blockedWords") private var blockedRaw = AutoReply.defaultBlocked
     @AppStorage("cs.skipBlocked") private var skipBlocked = true
-    @AppStorage("cs.autoReply") private var autoReply = false
+    @AppStorage("cs.autoReply") private var autoReply = true
 
     enum Show: String, CaseIterable { case pendientes = "Pendientes", todos = "Todos", spam = "Spam" }
 

@@ -9,7 +9,8 @@ enum AutoReply {
     static let defaultBlocked = "http, www., .com, gana dinero, sígueme, follow me, sub4sub"
 
     private static let d = UserDefaults.standard
-    static var enabled: Bool { d.bool(forKey: "cs.autoReply") }
+    /// Encendida por defecto: responde sola en YouTube, Facebook e Instagram.
+    static var enabled: Bool { d.object(forKey: "cs.autoReply") as? Bool ?? true }
     static var templates: [String] { lines(d.string(forKey: "cs.replyTemplates") ?? defaultTemplates) }
     static var rules: [(keys: [String], reply: String)] {
         lines(d.string(forKey: "cs.replyRules") ?? defaultRules).compactMap { line in

@@ -35,7 +35,7 @@ struct ContentSchedulerApp: App {
 
     static func scheduleRefresh() {
         let req = BGAppRefreshTaskRequest(identifier: refreshID)
-        req.earliestBeginDate = Date.now.addingTimeInterval(20 * 60)
+        req.earliestBeginDate = Date.now.addingTimeInterval(15 * 60)
         try? BGTaskScheduler.shared.submit(req)
     }
 
@@ -51,6 +51,26 @@ struct ContentSchedulerApp: App {
         await meta.refresh()
         await Publisher.publishDue(store: store, meta: meta)
         WeeklyReport.sendIfDue(store: store, yt: yt, meta: meta)
+        let done = await autoReplyAll(yt: yt, meta: meta)
+        let total = done.values.reduce(0, +)
+        if total > 0 { store.show("Respondí \(total) \(total == 1 ? "comentario" : "comentarios") automáticamente") }
+    }
+
+    /// Responde solo los comentarios pendientes de YouTube, Facebook e Instagram. Devuelve cuántos respondió en cada red.
+    @MainActor
+    static func autoReplyAll(yt: YouTubeService, meta: MetaService) async -> [Network: Int] {
+        guard AutoReply.enabled else { return [:] }
+        var done: [Network: Int] = [:]
+        if yt.isConnected, let list = try? await yt.comments() {
+            done[.youtube] = await AutoReply.run(list, yt: yt)
+        }
+        for n in [Network.facebook, .instagram] where (n == .facebook ? meta.facebookConnected : meta.instagramConnected) {
+            if let list = try? await meta.comments(n) {
+                let acc = n == .facebook ? meta.page?.name : meta.page?.igUsername
+                done[n] = await AutoReply.run(list, network: n, account: acc) { c, text in try await meta.reply(n, to: c.commentID, text: text) }
+            }
+        }
+        return done.filter { $0.value > 0 }
     }
 
     @MainActor
@@ -58,27 +78,20 @@ struct ContentSchedulerApp: App {
         await Publisher.publishDue(store: store, meta: meta)
         await meta.refresh()
         WeeklyReport.sendIfDue(store: store, yt: yt, meta: meta)
+        if yt.isConnected { await Publisher.refresh(store: store, yt: yt) }
         if AutoReply.enabled {
-            for n in [Network.facebook, .instagram] where (n == .facebook ? meta.facebookConnected : meta.instagramConnected) {
-                if let list = try? await meta.comments(n) {
-                    let acc = n == .facebook ? meta.page?.name : meta.page?.igUsername
-                    let done = await AutoReply.run(list, network: n, account: acc) { c, text in try await meta.reply(n, to: c.commentID, text: text) }
-                    if done > 0 { Notifier.send("Respuestas automáticas", "Respondí \(done) en \(n.name).") }
-                }
+            let done = await autoReplyAll(yt: yt, meta: meta)
+            let total = done.values.reduce(0, +)
+            if total > 0 {
+                let detail = done.map { "\($0.value) en \($0.key.name)" }.joined(separator: ", ")
+                Notifier.send("Respuestas automáticas", "Respondí \(total) \(total == 1 ? "comentario" : "comentarios"): \(detail).")
             }
-        }
-        guard yt.isConnected else { return }
-        await Publisher.refresh(store: store, yt: yt)
-        guard let comments = try? await yt.comments() else { return }
-        let pending = comments.filter { !$0.replied && !AutoReply.answered.contains($0.id) }
-        let seen = Set(UserDefaults.standard.stringArray(forKey: "cs.seenComments") ?? [])
-        let fresh = pending.filter { !seen.contains($0.id) }
-        UserDefaults.standard.set(Array(seen.union(comments.map(\.id)).suffix(3000)), forKey: "cs.seenComments")
-        if AutoReply.enabled {
-            let n = await AutoReply.run(pending, yt: yt)
-            if n > 0 { Notifier.send("Respuestas automáticas", "Respondí \(n) \(n == 1 ? "comentario" : "comentarios") en YouTube.") }
-        } else if !fresh.isEmpty {
-            Notifier.send("Comentarios nuevos", "Tienes \(fresh.count) \(fresh.count == 1 ? "comentario nuevo" : "comentarios nuevos") en YouTube.")
+        } else if yt.isConnected, let comments = try? await yt.comments() {
+            let pending = comments.filter { !$0.replied && !AutoReply.answered.contains($0.id) }
+            let seen = Set(UserDefaults.standard.stringArray(forKey: "cs.seenComments") ?? [])
+            let fresh = pending.filter { !seen.contains($0.id) }
+            UserDefaults.standard.set(Array(seen.union(comments.map(\.id)).suffix(3000)), forKey: "cs.seenComments")
+            if !fresh.isEmpty { Notifier.send("Comentarios nuevos", "Tienes \(fresh.count) \(fresh.count == 1 ? "comentario nuevo" : "comentarios nuevos") en YouTube.") }
         }
     }
 }
