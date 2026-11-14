@@ -46,6 +46,12 @@ En Ajustes → **IA (NVIDIA NIM)** pegas tu clave de build.nvidia.com; se guarda
 Más IA: portada elegida con visión, gancho en pantalla (3 s), subtítulos corregidos, «✨ Escribir con IA» (título, texto por red y hashtags) en el editor, consejo de horarios, ideas de contenido, clasificación de comentarios (preguntas, críticas y colaboraciones van a «Para ti» y no se responden solas), resumen de comentarios y estilo aprendido de tus respuestas a mano.
 Modelos automáticos por tarea: clipping rápido con `deepseek-ai/deepseek-v4.1-flash`, comentarios orgánicos con `writer/palmyra-creative-122b` y hashtags con `z-ai/glm-5.3-flash`, cada uno con respaldos (se puede fijar otro en Ajustes). Alternativa con servidor: carpeta `server/`.
 
+### Twitch (clips de directos)
+
+Clipper → **Clips de Twitch**. Vigila el chat de un directo y crea clips en Twitch cuando el chat explota o hay muchas reacciones (API oficial, máx. 1 por minuto). Los clips de **tu canal** se bajan y pasan a 9:16 con seguimiento de cara y subtítulos directo a la cola (Twitch no permite bajar clips de otros canales). Kick no tiene API pública de clips.
+
+Configurar: en dev.twitch.tv → Applications → Register: tipo **Public**, OAuth Redirect `http://localhost`, activa **Device Code Flow**. Copia el **Client ID** a `ios/Config.xcconfig` → `TWITCH_CLIENT_ID`.
+
 ### Google Drive (almacenamiento de clips)
 
 En Ajustes → **Conectar Google Drive**. Los clips del Clipper se guardan en la carpeta «Content Scheduler» de tu Drive y no en el iPhone; se bajan un momento solo al publicarse. Permiso `drive.file`: la app solo ve los archivos que ella misma crea. En Google Cloud: activa **Google Drive API** y agrega el alcance `.../auth/drive.file` en la pantalla de consentimiento.

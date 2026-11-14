@@ -11,3 +11,6 @@ CLIP_AI_URL =
 
 // Clave de NVIDIA metida en la app al compilar (viene del Secret NIM_API_KEY de GitHub; aquí siempre vacía).
 NIM_EMBEDDED_KEY = 
+
+// Client ID de tu app de Twitch (dev.twitch.tv > Applications; tipo «Pública», con Device Code Flow). Es público.
+TWITCH_CLIENT_ID = 

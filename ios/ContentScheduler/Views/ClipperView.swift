@@ -17,6 +17,7 @@ struct ClipperView: View {
     @State private var pick: PhotosPickerItem?
     @State private var importingFile = false
     @State private var live = false
+    @State private var twitchOpen = false
     @State private var ytLink = ""
     @Environment(\.openURL) private var openURL
     private var drive: DriveService { DriveService.shared }
@@ -54,6 +55,19 @@ struct ClipperView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("Clipping en vivo").font(.title3).foregroundStyle(Theme.fg)
                                 Text("Graba con la cámara y te va dando clips mientras grabas.").font(.footnote).foregroundStyle(Theme.muted)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
+                        }
+                        .padding(16).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+                    }.buttonStyle(.plain)
+                    Button { twitchOpen = true } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "dot.radiowaves.left.and.right").font(.title2).foregroundStyle(.white)
+                                .frame(width: 48, height: 48).background(Color(hex: 0x9146FF))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Clips de Twitch").font(.title3).foregroundStyle(Theme.fg)
+                                Text("Clipea un directo solo cuando el chat explota.").font(.footnote).foregroundStyle(Theme.muted)
                             }
                             Spacer()
                             Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
@@ -116,6 +130,7 @@ struct ClipperView: View {
             }
             .onChange(of: pick) { _, item in Task { await load(item) } }
             .fullScreenCover(isPresented: $live) { LiveClipperView() }
+            .sheet(isPresented: $twitchOpen) { TwitchView() }
             .fileImporter(isPresented: $importingFile, allowedContentTypes: [.movie, .video, .mpeg4Movie, .quickTimeMovie]) { result in
                 guard case .success(let url) = result else { return }
                 Task { await loadFile(url) }
