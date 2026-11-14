@@ -21,6 +21,10 @@ enum Watermark {
 
     static let logoURL = AppStore.documents.appendingPathComponent("watermark.png")
     static var logo: UIImage? { UIImage(contentsOfFile: logoURL.path) }
+    /// Logo de Content Scheduler incluido en la app.
+    static var brandLogo: UIImage? { UIImage(named: "cs-logo") }
+    static func useBrandLogo() { saveLogo(brandLogo?.pngData()) }
+
     static func saveLogo(_ data: Data?) {
         if let data, let img = UIImage(data: data), let png = img.pngData() { try? png.write(to: logoURL, options: .atomic) }
         else { try? FileManager.default.removeItem(at: logoURL) }
@@ -88,7 +92,14 @@ struct WatermarkSettings: View {
     @State private var pick: PhotosPickerItem?
 
     var body: some View {
-        Toggle(isOn: $on) {
+        Toggle(isOn: Binding(get: { on }, set: { v in
+            on = v
+            // La primera vez, pone el logo de Content Scheduler
+            if v && logo == nil && !UserDefaults.standard.bool(forKey: "wm.set") {
+                Watermark.useBrandLogo(); logo = Watermark.logo
+                UserDefaults.standard.set(true, forKey: "wm.set")
+            }
+        })) {
             VStack(alignment: .leading) {
                 Text("Marca de agua").bold()
                 Text("Tu @ y/o tu logo en todos los clips.").font(.caption).foregroundStyle(Theme.muted)
@@ -108,8 +119,15 @@ struct WatermarkSettings: View {
             .frame(maxWidth: .infinity)
             TextField("@tucuenta", text: $text).textInputAutocapitalization(.never).autocorrectionDisabled()
                 .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            Button { Watermark.useBrandLogo(); logo = Watermark.logo } label: {
+                HStack(spacing: 10) {
+                    Image("cs-logo").resizable().frame(width: 28, height: 28).clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    Text("Usar logo de Content Scheduler").font(.subheadline.weight(.semibold))
+                    Spacer()
+                }.padding(10).background(Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }.buttonStyle(.plain).foregroundStyle(Theme.accent)
             HStack {
-                PhotosPicker(selection: $pick, matching: .images) { Label(logo == nil ? "Elegir logo" : "Cambiar logo", systemImage: "photo") }
+                PhotosPicker(selection: $pick, matching: .images) { Label(logo == nil ? "Elegir logo" : "Otro logo", systemImage: "photo") }
                     .buttonStyle(BoxButtonStyle())
                 if logo != nil {
                     Button("Quitar logo") { Watermark.saveLogo(nil); logo = nil }.buttonStyle(BoxButtonStyle(color: Theme.red))
