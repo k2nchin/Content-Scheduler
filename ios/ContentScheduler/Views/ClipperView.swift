@@ -12,7 +12,10 @@ struct ClipperView: View {
     @Environment(\.dismiss) private var dismiss
 
     struct Clip: Identifiable, Hashable { let id = UUID(); var start: Double; var end: Double; var energy: Double?; var ai: ClipAI.Result? = nil }
-    enum Mode: String, CaseIterable { case ia = "IA", energia = "Energía", dividir = "Dividir", manual = "A mano" }
+    enum Mode: String, CaseIterable { case ia = "IA", ambos = "IA + Energía", energia = "Energía", dividir = "Dividir", manual = "A mano" }
+    enum Step { case fuente, ajustes, procesando, resultados }
+    /// Clip ya creado, esperando que decidas qué hacer con él.
+    struct Made: Identifiable { let id = UUID(); let url: URL; let clip: Clip; var thumb: UIImage?; var title: String }
 
     @State private var pick: PhotosPickerItem?
     @State private var importingFile = false
@@ -42,112 +45,209 @@ struct ClipperView: View {
     @State private var hooks = true
     @State private var working = false
     @State private var status = ""
+    @State private var step: Step = .fuente
+    @State private var subStyle: SubStyle = .clasico
+    @State private var made: [Made] = []
+    @State private var progress = 0.0
+    @State private var stage = 0          // 0 escuchar, 1 elegir, 2 crear
+    @State private var preview: Made?
+    @State private var byScore = true
 
     var body: some View {
         NavigationStack {
             Screen {
-                PageTitle(kicker: "Saca lo mejor", title: "Clipper")
-                if source == nil {
-                    Button { live = true } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: "record.circle").font(.title2).foregroundStyle(.white)
-                                .frame(width: 48, height: 48).background(.red)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Clipping en vivo").font(.title3).foregroundStyle(Theme.fg)
-                                Text("Graba con la cámara y te va dando clips mientras grabas.").font(.footnote).foregroundStyle(Theme.muted)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
-                        }
-                        .padding(16).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
-                    }.buttonStyle(.plain)
-                    Button { twitchOpen = true } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: "dot.radiowaves.left.and.right").font(.title2).foregroundStyle(.white)
-                                .frame(width: 48, height: 48).background(Color(hex: 0x9146FF))
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Clips de Twitch").font(.title3).foregroundStyle(Theme.fg)
-                                Text("Clipea un directo solo cuando el chat explota.").font(.footnote).foregroundStyle(Theme.muted)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
-                        }
-                        .padding(16).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
-                    }.buttonStyle(.plain)
-                    PhotosPicker(selection: $pick, matching: .videos) {
-                        VStack(spacing: 10) {
-                            Image(systemName: "scissors").font(.system(size: 34)).foregroundStyle(Theme.accent)
-                            Text("Elegir video largo").font(.headline).foregroundStyle(Theme.fg)
-                            Text("Un en vivo, un ensayo o un concierto. Se queda en tu iPhone.").font(.caption).foregroundStyle(Theme.muted)
-                        }
-                        .frame(maxWidth: .infinity).padding(.vertical, 34)
-                        .overlay(Rectangle().strokeBorder(Theme.accent.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, dash: [5])))
-                    }
-                    Box {
-                        Text("LINK DE TU VIDEO DE YOUTUBE").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
-                        TextField("https://youtu.be/… o youtube.com/live/…", text: $ytLink)
-                            .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .padding(10).background(Theme.bg3)
-                        Button {
-                            guard let id = youtubeID(ytLink) else { return store.show("Ese no parece un link de YouTube.") }
-                            openURL(URL(string: "https://studio.youtube.com/video/\(id)/edit")!)
-                        } label: { Label("Abrir descarga en YouTube Studio", systemImage: "arrow.down.circle").frame(maxWidth: .infinity) }
-                            .buttonStyle(BoxButtonStyle(filled: true))
-                        Text("Solo funciona con videos de tu canal. En YouTube Studio toca ⋮ → Descargar, guárdalo en Archivos (o en Drive) y elígelo abajo con «Elegir desde Archivos».")
-                            .font(.caption).foregroundStyle(Theme.muted)
-                    }
-                    Button { importingFile = true } label: {
-                        Label("Elegir desde Archivos (Google Drive, iCloud…)", systemImage: "folder").frame(maxWidth: .infinity)
-                    }.buttonStyle(BoxButtonStyle())
-                    Text("Para ver tu Google Drive aquí, instala la app de Google Drive y actívala en Archivos → Explorar → ⋯ → Editar.")
-                        .font(.caption).foregroundStyle(Theme.muted)
-                    if loading { ProgressView("Preparando video…").frame(maxWidth: .infinity) }
-                } else {
-                    if let player {
-                        VideoPlayer(player: player).frame(height: 240).background(.black).clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    Text("Duración: \(clock(duration))").font(.caption).foregroundStyle(Theme.muted)
-                    modePicker
-                    switch mode {
-                    case .ia: aiBox
-                    case .energia: energyBox
-                    case .dividir: splitBox
-                    case .manual: manualBox
-                    }
-                    clipsList
-                    optionsBox
-                    if working { HStack { ProgressView(); Text(status).font(.footnote) }.frame(maxWidth: .infinity) }
-                    Text(drive.isConnected && drive.useDrive
-                         ? "Los clips se guardan en tu Google Drive (carpeta «Content Scheduler»), no en tu iPhone. «Guardar» estará disponible más adelante."
-                         : "Los clips no se guardan en tu galería: se quedan en la app hasta subirse. Conecta Google Drive en Ajustes para guardarlos en la nube.")
-                        .font(.caption).foregroundStyle(Theme.muted)
-                    Button { Task { await createClips() } } label: { Text(clips.isEmpty ? "Agrega clips primero" : "Crear \(clips.count) clips y mandar a la cola") }
-                        .buttonStyle(PrimaryButtonStyle()).disabled(clips.isEmpty || working)
+                PageTitle(kicker: stepKicker, title: "Clipper")
+                stepBar
+                switch step {
+                case .fuente: sourceStep
+                case .ajustes: settingsStep
+                case .procesando: processingStep
+                case .resultados: resultsStep
                 }
             }
             .toolbar {
-                if !inTab { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { cleanup(); dismiss() }.disabled(working) } }
+                if !inTab { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { discardAll(); cleanup(); dismiss() }.disabled(working) } }
             }
-            .onChange(of: pick) { _, item in Task { await load(item) } }
+            .onChange(of: pick) { _, item in Task { await load(item); if source != nil { step = .ajustes } } }
             .fullScreenCover(isPresented: $live) { LiveClipperView() }
             .sheet(isPresented: $twitchOpen) { TwitchView() }
+            .sheet(item: $preview) { m in ResultPreview(made: m, onQueue: { t in Task { await queue(m, title: t) } }, onDiscard: { discard(m) }) }
             .fileImporter(isPresented: $importingFile, allowedContentTypes: [.movie, .video, .mpeg4Movie, .quickTimeMovie]) { result in
                 guard case .success(let url) = result else { return }
-                Task { await loadFile(url) }
+                Task { await loadFile(url); if source != nil { step = .ajustes } }
             }
         }
+    }
+
+    // MARK: Pasos
+
+    private var stepKicker: String {
+        switch step { case .fuente: "Paso 1 · Fuente"; case .ajustes: "Paso 2 · Ajustes"; case .procesando: "Paso 3 · Creando"; case .resultados: "Paso 4 · Tus clips" }
+    }
+
+    private var stepBar: some View {
+        let order: [Step] = [.fuente, .ajustes, .procesando, .resultados]
+        let names = ["Fuente", "Ajustes", "Creando", "Clips"]
+        let current = order.firstIndex(of: step) ?? 0
+        return HStack(spacing: 6) {
+            ForEach(0..<4, id: \.self) { i in
+                VStack(spacing: 4) {
+                    Rectangle().fill(i <= current ? Theme.accent : Theme.line).frame(height: 3)
+                    Text(names[i]).font(.system(size: 10, weight: i == current ? .bold : .regular, design: .monospaced))
+                        .foregroundStyle(i == current ? Theme.fg : Theme.muted)
+                }
+            }
+        }
+    }
+
+    private func sourceCard(_ icon: String, _ color: Color, _ title: String, _ detail: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon).font(.title2).foregroundStyle(.white).frame(width: 48, height: 48).background(color)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.title3).foregroundStyle(Theme.fg)
+                Text(detail).font(.footnote).foregroundStyle(Theme.muted)
+            }
+            Spacer()
+            Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
+        }
+        .padding(16).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+    }
+
+    @ViewBuilder private var sourceStep: some View {
+        PhotosPicker(selection: $pick, matching: .videos) {
+            sourceCard("photo.on.rectangle", Theme.accent, "Video de tu galería", "Un en vivo, un ensayo, un podcast o un concierto.")
+        }.buttonStyle(.plain)
+        Button { importingFile = true } label: {
+            sourceCard("folder", Color(hex: 0x1A73E8), "Archivos o Google Drive", "Para videos largos guardados en la nube.")
+        }.buttonStyle(.plain)
+        Button { live = true } label: {
+            sourceCard("record.circle", .red, "Clipping en vivo", "Graba con la cámara y te va dando clips.")
+        }.buttonStyle(.plain)
+        Button { twitchOpen = true } label: {
+            sourceCard("dot.radiowaves.left.and.right", Color(hex: 0x9146FF), "Twitch", "Clipea un directo cuando el chat explota.")
+        }.buttonStyle(.plain)
+        if loading { ProgressView("Preparando video…").frame(maxWidth: .infinity) }
+        Box {
+            Text("TU VIDEO DE YOUTUBE").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+            TextField("https://youtu.be/… o youtube.com/live/…", text: $ytLink)
+                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .padding(10).background(Theme.bg3)
+            Button {
+                guard let id = youtubeID(ytLink) else { return store.show("Ese no parece un link de YouTube.") }
+                openURL(URL(string: "https://studio.youtube.com/video/\(id)/edit")!)
+            } label: { Label("Abrir descarga en YouTube Studio", systemImage: "arrow.down.circle").frame(maxWidth: .infinity) }
+                .buttonStyle(BoxButtonStyle())
+            Text("Solo videos de tu canal: en YouTube Studio toca ⋮ → Descargar y luego elígelo en «Archivos o Google Drive».")
+                .font(.caption).foregroundStyle(Theme.muted)
+        }
+    }
+
+    @ViewBuilder private var settingsStep: some View {
+        if let player {
+            VideoPlayer(player: player).frame(height: 220).background(.black).clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        HStack {
+            Text("Duración del video: \(clock(duration))").font(.caption).foregroundStyle(Theme.muted)
+            Spacer()
+            Button("Cambiar video") { cleanup(); step = .fuente }.font(.caption.bold())
+        }
+        SectionLabel(text: "Cómo elegir los momentos")
+        modePicker
+        if mode == .ia || mode == .ambos {
+            if !ClipAI.isConfigured {
+                DemoBanner(text: "Para usar la IA pon tu clave de NVIDIA en Ajustes → IA. Mientras tanto usa «Energía».", icon: "exclamationmark.triangle")
+            } else {
+                Text("La IA lee lo que se dice y elige lo más viral, con gancho, títulos por red y hashtags.").font(.caption).foregroundStyle(Theme.muted)
+            }
+        }
+        if mode == .energia || mode == .ambos {
+            Text("Energía: busca gritos, risas, aplausos y el coro en el audio.").font(.caption).foregroundStyle(Theme.muted)
+        }
+        if mode == .manual { manualBox; clipsList }
+        if mode != .manual {
+            SectionLabel(text: "Duración y cantidad")
+            lengthPicker
+            if mode != .dividir {
+                Stepper("Cuántos clips: \(count)", value: $count, in: 1...15).font(.footnote)
+            } else {
+                Text("Salen \(Int(ceil(duration / length))) partes.").font(.footnote)
+            }
+        }
+        SectionLabel(text: "Formato y estilo")
+        optionsBox
+        if subtitles {
+            Box {
+                Text("ESTILO DE SUBTÍTULOS").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(SubStyle.allCases, id: \.self) { st in
+                        Button { subStyle = st } label: {
+                            Text(st.sample).font(.system(size: 13, weight: .heavy))
+                                .foregroundStyle(st.textColor).padding(.horizontal, 8).padding(.vertical, 6)
+                                .background(st.boxColor, in: RoundedRectangle(cornerRadius: 6))
+                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                .background(Color.gray.opacity(0.35))
+                                .overlay(Rectangle().strokeBorder(subStyle == st ? Theme.accent : .clear, lineWidth: 2))
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        Button { Task { await process() } } label: { Text(mode == .manual && clips.isEmpty ? "Marca al menos un clip" : "Crear clips") }
+            .buttonStyle(PrimaryButtonStyle()).disabled(working || (mode == .manual && clips.isEmpty))
+    }
+
+    @ViewBuilder private var processingStep: some View {
+        Box {
+            ForEach(Array(["Escuchando el video", "Eligiendo los mejores momentos", "Creando los clips"].enumerated()), id: \.offset) { i, name in
+                HStack(spacing: 10) {
+                    Image(systemName: i < stage ? "checkmark.circle.fill" : i == stage ? "circle.dotted" : "circle")
+                        .foregroundStyle(i < stage ? Theme.ok : i == stage ? Theme.accent : Theme.muted)
+                    Text(name).font(.subheadline.weight(i == stage ? .bold : .regular)).foregroundStyle(i <= stage ? Theme.fg : Theme.muted)
+                }
+            }
+            if stage == 2 { ProgressView(value: progress).tint(Theme.accent) }
+            Text(status).font(.caption).foregroundStyle(Theme.muted)
+        }
+        Text("Puedes cambiar de pestaña; no cierres la app hasta que termine. Todo se hace en tu iPhone.").font(.caption).foregroundStyle(Theme.muted)
+    }
+
+    @ViewBuilder private var resultsStep: some View {
+        HStack {
+            Text("\(made.count) clips listos").font(.headline)
+            Spacer()
+            Button(byScore ? "Por puntaje" : "Por orden") { byScore.toggle() }.font(.caption.bold())
+        }
+        if made.isEmpty {
+            Text("No quedó ningún clip. Prueba con otra duración o con «Energía».").font(.footnote).foregroundStyle(Theme.muted)
+        }
+        let list = byScore ? made.sorted { ($0.clip.ai?.score ?? Int(($0.clip.energy ?? 0) * 100)) > ($1.clip.ai?.score ?? Int(($1.clip.energy ?? 0) * 100)) } : made
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            ForEach(list) { m in
+                Button { preview = m } label: { ResultCard(made: m) }.buttonStyle(.plain)
+            }
+        }
+        if !made.isEmpty {
+            Button { Task { for m in made { await queue(m, title: m.title) } } } label: { Text("Mandar todos a la cola (\(made.count))") }
+                .buttonStyle(PrimaryButtonStyle()).disabled(working)
+        }
+        Button { discardAll(); cleanup(); step = .fuente } label: { Text("Nuevo video").frame(maxWidth: .infinity) }
+            .buttonStyle(BoxButtonStyle())
+        Text(drive.isConnected && drive.useDrive ? "Al mandarlos a la cola se guardan en tu Google Drive, no en tu iPhone." : "Toca un clip para verlo, cambiar el título, mandarlo a la cola o descartarlo.")
+            .font(.caption).foregroundStyle(Theme.muted)
     }
 
     // MARK: Modos
 
     private var modePicker: some View {
-        HStack(spacing: 0) {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
             ForEach(Mode.allCases, id: \.self) { m in
                 Button(m.rawValue) { mode = m }
-                    .font(.footnote).frame(maxWidth: .infinity).padding(.vertical, 10)
+                    .font(.footnote).lineLimit(1).minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity).padding(.vertical, 10)
                     .foregroundStyle(mode == m ? .white : Theme.muted).background(mode == m ? Theme.accent : Theme.bg2)
+                    .overlay(Rectangle().strokeBorder(Theme.line))
             }
-        }.overlay(Rectangle().strokeBorder(Theme.line))
+        }
     }
 
     private var lengthPicker: some View {
@@ -442,48 +542,89 @@ struct ClipperView: View {
         if !clips.isEmpty { seek(clips[0].start) }
     }
 
-    private func createClips() async {
+    /// Paso 3: elige los momentos (según el modo) y crea cada clip; luego muestra los resultados.
+    private func process() async {
         guard let source else { return }
-        working = true
         player?.pause()
-        var made = 0
+        step = .procesando
+        stage = 0; progress = 0
+        switch mode {
+        case .ia:
+            await findAI()
+        case .energia:
+            stage = 1; await findEnergy()
+        case .ambos:
+            await findAI()
+            let ai = clips
+            stage = 1
+            await findEnergy()
+            var merged = ai
+            for e in clips.sorted(by: { ($0.energy ?? 0) > ($1.energy ?? 0) }) where merged.count < count {
+                if !merged.contains(where: { e.start < $0.end && e.end > $0.start }) { merged.append(e) }
+            }
+            clips = merged.sorted { $0.start < $1.start }
+        case .dividir:
+            clips = stride(from: 0.0, to: duration, by: length).map { Clip(start: $0, end: min(duration, $0 + length)) }.filter { $0.end - $0.start >= 3 }
+        case .manual:
+            break
+        }
+        guard !clips.isEmpty else { step = .ajustes; return }
+        stage = 2
+        working = true
+        defer { working = false }
         for (i, c) in clips.enumerated() {
             status = "Creando clip \(i + 1) de \(clips.count)…"
+            progress = Double(i) / Double(clips.count)
             do {
-                let url = try await StudioExport.run(source: source, start: c.start, end: c.end, subtitles: subtitles, vertical: vertical && isHorizontal, track: track,
-                                                       hook: hooks ? c.ai?.hook : nil) { _ in }
-                let id = await store.addVideo(from: url, youtubeConnected: youtube.isConnected)
-                if let ai = c.ai {
-                    store.update(id) {
-                        let main = ai.titles.youtube.isEmpty ? ai.hook : ai.titles.youtube
-                        if !main.isEmpty { $0.title = String(main.prefix(100)) }
-                        $0.custom = [Network.instagram.rawValue: ai.titles.instagram, Network.facebook.rawValue: ai.titles.facebook]
-                            .filter { !$0.value.isEmpty }
-                        if !ai.hashtags.isEmpty { $0.tags = ai.hashtags.joined(separator: " ") }
-                    }
-                }
-                if drive.isConnected && drive.useDrive {
-                    status = "Guardando clip \(i + 1) en Google Drive…"
-                    do {
-                        let did = try await drive.upload(url, name: "Clip \(i + 1) · \(Date.now.formatted(.dateTime.day().month().hour().minute())).mp4")
-                        store.update(id) { $0.driveID = did }
-                        store.deleteVideoFile(of: id)   // ya está en la nube: no ocupa espacio en el iPhone
-                    } catch {
-                        store.show("Clip \(i + 1) quedó en el iPhone: \(error.localizedDescription)")
-                    }
-                }
-                made += 1
+                let url = try await StudioExport.run(source: source, start: c.start, end: c.end, subtitles: subtitles,
+                                                     vertical: vertical && isHorizontal, track: track,
+                                                     hook: hooks ? c.ai?.hook : nil, style: subStyle) { _ in }
+                let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+                gen.appliesPreferredTrackTransform = true
+                gen.maximumSize = CGSize(width: 400, height: 400)
+                let thumb = (try? await gen.image(at: CMTime(seconds: 1, preferredTimescale: 600)).image).map { UIImage(cgImage: $0) }
+                var base = ""
+                if let ai = c.ai { base = ai.titles.youtube.isEmpty ? ai.hook : ai.titles.youtube }
+                let title = base.isEmpty ? "Clip \(i + 1)" : base
+                made.append(Made(url: url, clip: c, thumb: thumb, title: title))
             } catch {
                 store.show("Clip \(i + 1): \(error.localizedDescription)")
             }
         }
-        working = false
-        if made > 0 {
-            store.show("\(made) clips agregados a la cola")
-            cleanup()
-            clips = []
-            if !inTab { dismiss() }
+        progress = 1
+        clips = []
+        step = .resultados
+        Notifier.send("✂️ Tus clips están listos", "\(made.count) clips para revisar en el Clipper.")
+    }
+
+    /// Manda un clip a la cola (con los textos de la IA) y, si está activado, a Google Drive.
+    private func queue(_ m: Made, title: String) async {
+        guard made.contains(where: { $0.id == m.id }) else { return }
+        let id = await store.addVideo(from: m.url, youtubeConnected: youtube.isConnected)
+        store.update(id) {
+            $0.title = String(title.prefix(100))
+            if let ai = m.clip.ai {
+                $0.custom = [Network.instagram.rawValue: ai.titles.instagram, Network.facebook.rawValue: ai.titles.facebook].filter { !$0.value.isEmpty }
+                if !ai.hashtags.isEmpty { $0.tags = ai.hashtags.joined(separator: " ") }
+            }
         }
+        if drive.isConnected && drive.useDrive, let did = try? await drive.upload(m.url, name: "\(title.prefix(40)).mp4") {
+            store.update(id) { $0.driveID = did }
+            store.deleteVideoFile(of: id)
+        }
+        made.removeAll { $0.id == m.id }
+        store.show("Clip en la cola ✓")
+        if made.isEmpty { cleanup(); step = .fuente }
+    }
+
+    private func discard(_ m: Made) {
+        try? FileManager.default.removeItem(at: m.url)
+        made.removeAll { $0.id == m.id }
+    }
+
+    private func discardAll() {
+        for m in made { try? FileManager.default.removeItem(at: m.url) }
+        made = []
     }
 
     private func cleanup() {
@@ -491,6 +632,73 @@ struct ClipperView: View {
         if let source { try? FileManager.default.removeItem(at: source) }
         source = nil
         player = nil
+    }
+}
+
+/// Tarjeta de un clip terminado (galería de resultados).
+struct ResultCard: View {
+    let made: ClipperView.Made
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topLeading) {
+                Group {
+                    if let t = made.thumb { Image(uiImage: t).resizable().scaledToFill() } else { Theme.bg3 }
+                }
+                .frame(maxWidth: .infinity).frame(height: 210).clipped()
+                if let score = made.clip.ai?.score {
+                    Text("\(score)").font(.system(size: 13, weight: .heavy, design: .monospaced)).foregroundStyle(.white)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(score >= 70 ? Theme.ok : score >= 45 ? Theme.warn : Theme.muted).padding(6)
+                } else if let e = made.clip.energy {
+                    Label("\(Int(e * 100))", systemImage: "waveform").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 3).background(.black.opacity(0.6)).padding(6)
+                }
+                Image(systemName: "play.circle.fill").font(.system(size: 34)).foregroundStyle(.white.opacity(0.9))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(height: 210)
+            Text(made.title).font(.footnote.bold()).lineLimit(2).foregroundStyle(Theme.fg)
+            Text("\(Int(made.clip.end - made.clip.start)) s").font(.caption2).foregroundStyle(Theme.muted)
+        }
+        .padding(8).background(Theme.bg2).overlay(Rectangle().strokeBorder(Theme.line))
+    }
+}
+
+/// Ver un clip terminado, cambiar su título y decidir: a la cola o descartar.
+struct ResultPreview: View {
+    let made: ClipperView.Made
+    let onQueue: (String) -> Void
+    let onDiscard: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var player: AVPlayer?
+
+    var body: some View {
+        NavigationStack {
+            Screen {
+                if let player {
+                    VideoPlayer(player: player).frame(height: 420).background(.black).clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                if let ai = made.clip.ai {
+                    HStack(spacing: 8) {
+                        Text("\(ai.score)").font(.system(size: 14, weight: .heavy, design: .monospaced)).foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(ai.score >= 70 ? Theme.ok : ai.score >= 45 ? Theme.warn : Theme.muted)
+                        Text("Potencial viral").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                    if !ai.reason.isEmpty { Text(ai.reason).font(.footnote).foregroundStyle(Theme.muted) }
+                    if !ai.hashtags.isEmpty { Text(ai.hashtags.joined(separator: " ")).font(.caption).foregroundStyle(Theme.accent) }
+                }
+                Text("Título").font(.caption).foregroundStyle(Theme.muted)
+                TextField("Título", text: $title, axis: .vertical).lineLimit(1...3).padding(10).background(Theme.bg3)
+                Button { onQueue(title); dismiss() } label: { Text("A la cola") }.buttonStyle(PrimaryButtonStyle())
+                Button(role: .destructive) { onDiscard(); dismiss() } label: { Text("Descartar") }
+                    .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.red))
+            }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { dismiss() } } }
+            .onAppear { title = made.title; player = AVPlayer(url: made.url); player?.play() }
+            .onDisappear { player?.pause() }
+        }
     }
 }
 

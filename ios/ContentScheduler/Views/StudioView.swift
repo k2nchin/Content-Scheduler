@@ -209,7 +209,7 @@ struct StudioView: View {
 enum StudioExport {
     struct Line { let text: String; let start: Double; let end: Double }
 
-    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, track: Bool = true, hook: String? = nil, status: @escaping (String) -> Void) async throws -> URL {
+    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, track: Bool = true, hook: String? = nil, style: SubStyle = .clasico, status: @escaping (String) -> Void) async throws -> URL {
         var source = source
         var start = start, end = end
         if vertical {
@@ -272,12 +272,8 @@ enum StudioExport {
             let fontSize = size.width * 0.058
             for line in lines {
                 let text = CATextLayer()
-                text.string = NSAttributedString(string: line.text, attributes: [
-                    .font: UIFont.systemFont(ofSize: fontSize, weight: .heavy),
-                    .foregroundColor: UIColor.white,
-                    .strokeColor: UIColor.black,
-                    .strokeWidth: -3.5,
-                ])
+                text.string = NSAttributedString(string: style.uppercase ? line.text.uppercased() : line.text, attributes: style.attributes(fontSize))
+                if let box = style.box { text.backgroundColor = box.cgColor; text.cornerRadius = fontSize * 0.3 }
                 text.alignmentMode = .center
                 text.isWrapped = true
                 text.contentsScale = 2
@@ -442,5 +438,35 @@ struct ReframePicker: View {
                        : "El video entero queda al centro con el fondo difuminado.")
                 .font(.caption).foregroundStyle(Theme.muted)
         }
+    }
+}
+
+
+/// Estilos de subtítulos para los clips.
+enum SubStyle: String, CaseIterable, Hashable {
+    case clasico, amarillo, rosa, caja
+    var sample: String {
+        switch self { case .clasico: "Clásico"; case .amarillo: "AMARILLO"; case .rosa: "Rosa CS"; case .caja: "Caja negra" }
+    }
+    var uppercase: Bool { self == .amarillo }
+    var textColor: Color { self == .amarillo ? .yellow : .white }
+    var boxColor: Color {
+        switch self { case .rosa: Theme.accent; case .caja: .black.opacity(0.75); default: .clear }
+    }
+    var box: UIColor? {
+        switch self {
+        case .rosa: UIColor(red: 1, green: 0.04, blue: 0.54, alpha: 0.95)
+        case .caja: UIColor.black.withAlphaComponent(0.7)
+        default: nil
+        }
+    }
+    func attributes(_ size: CGFloat) -> [NSAttributedString.Key: Any] {
+        var a: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: size, weight: .heavy)]
+        switch self {
+        case .clasico: a[.foregroundColor] = UIColor.white; a[.strokeColor] = UIColor.black; a[.strokeWidth] = -3.5
+        case .amarillo: a[.foregroundColor] = UIColor.yellow; a[.strokeColor] = UIColor.black; a[.strokeWidth] = -4.0
+        case .rosa, .caja: a[.foregroundColor] = UIColor.white
+        }
+        return a
     }
 }
