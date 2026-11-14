@@ -253,7 +253,9 @@ enum StudioExport {
             throw YTError(message: "No se pudo preparar la exportación.")
         }
         let hookText = hook?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !lines.isEmpty || !hookText.isEmpty {
+        let r0 = natural.applying(transform)
+        let wmLayer = Watermark.layer(for: CGSize(width: abs(r0.width), height: abs(r0.height)))
+        if !lines.isEmpty || !hookText.isEmpty || wmLayer != nil {
             let r = natural.applying(transform)
             let size = CGSize(width: abs(r.width), height: abs(r.height))
             let vc = AVMutableVideoComposition()
@@ -288,6 +290,7 @@ enum StudioExport {
                 text.add(show, forKey: "show")
                 parent.addSublayer(text)
             }
+            if let wmLayer { parent.addSublayer(wmLayer) }
             if !hookText.isEmpty {
                 // Gancho grande arriba durante los primeros 3 segundos
                 let hookSize = size.width * 0.075

@@ -115,6 +115,9 @@ struct SettingsView: View {
                     }
                 }
 
+                SectionLabel(text: "Marca de agua")
+                Card { WatermarkSettings() }
+
                 SectionLabel(text: "IA (NVIDIA NIM)")
                 Card {
                     HStack(spacing: 12) {
