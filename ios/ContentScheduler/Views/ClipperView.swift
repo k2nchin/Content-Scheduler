@@ -1,6 +1,7 @@
 import SwiftUI
 import PhotosUI
 import AVKit
+import UniformTypeIdentifiers
 
 /// Clipper: de un video largo saca varios clips cortos y los manda a la cola.
 struct ClipperView: View {
@@ -12,6 +13,8 @@ struct ClipperView: View {
     enum Mode: String, CaseIterable { case energia = "Más energía", dividir = "Dividir", manual = "A mano" }
 
     @State private var pick: PhotosPickerItem?
+    @State private var importingFile = false
+    private var drive: DriveService { DriveService.shared }
     @State private var source: URL?
     @State private var player: AVPlayer?
     @State private var duration = 0.0
@@ -45,6 +48,11 @@ struct ClipperView: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 34)
                         .overlay(Rectangle().strokeBorder(Theme.accent.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, dash: [5])))
                     }
+                    Button { importingFile = true } label: {
+                        Label("Elegir desde Archivos (Google Drive, iCloud…)", systemImage: "folder").frame(maxWidth: .infinity)
+                    }.buttonStyle(BoxButtonStyle())
+                    Text("Para ver tu Google Drive aquí, instala la app de Google Drive y actívala en Archivos → Explorar → ⋯ → Editar.")
+                        .font(.caption).foregroundStyle(Theme.muted)
                     if loading { ProgressView("Preparando video…").frame(maxWidth: .infinity) }
                 } else {
                     if let player {
@@ -60,7 +68,9 @@ struct ClipperView: View {
                     clipsList
                     optionsBox
                     if working { HStack { ProgressView(); Text(status).font(.footnote) }.frame(maxWidth: .infinity) }
-                    Text("Los clips no se guardan en tu galería: se quedan en la app hasta subirse y luego se borran. «Guardar» estará disponible más adelante.")
+                    Text(drive.isConnected && drive.useDrive
+                         ? "Los clips se guardan en tu Google Drive (carpeta «Content Scheduler»), no en tu iPhone. «Guardar» estará disponible más adelante."
+                         : "Los clips no se guardan en tu galería: se quedan en la app hasta subirse. Conecta Google Drive en Ajustes para guardarlos en la nube.")
                         .font(.caption).foregroundStyle(Theme.muted)
                     Button { Task { await createClips() } } label: { Text(clips.isEmpty ? "Agrega clips primero" : "Crear \(clips.count) clips y mandar a la cola") }
                         .buttonStyle(PrimaryButtonStyle()).disabled(clips.isEmpty || working)
@@ -68,6 +78,10 @@ struct ClipperView: View {
             }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { cleanup(); dismiss() }.disabled(working) } }
             .onChange(of: pick) { _, item in Task { await load(item) } }
+            .fileImporter(isPresented: $importingFile, allowedContentTypes: [.movie, .video, .mpeg4Movie, .quickTimeMovie]) { result in
+                guard case .success(let url) = result else { return }
+                Task { await loadFile(url) }
+            }
         }
     }
 
@@ -226,10 +240,29 @@ struct ClipperView: View {
         loading = true
         defer { loading = false; pick = nil }
         guard let movie = try? await item.loadTransferable(type: PickedMovie.self) else { return store.show("No se pudo leer el video.") }
+        await open(movie.url)
+    }
+
+    /// Video elegido en Archivos (Drive, iCloud…): se copia a la app para poder cortarlo.
+    private func loadFile(_ url: URL) async {
+        loading = true
+        defer { loading = false }
+        let ok = url.startAccessingSecurityScopedResource()
+        defer { if ok { url.stopAccessingSecurityScopedResource() } }
+        let dest = AppStore.videosDir.appendingPathComponent(UUID().uuidString + "." + (url.pathExtension.isEmpty ? "mov" : url.pathExtension))
+        do {
+            try FileManager.default.copyItem(at: url, to: dest)
+            await open(dest)
+        } catch {
+            store.show("No se pudo abrir ese archivo. Si está en Drive, márcalo «Disponible sin conexión» e intenta otra vez.")
+        }
+    }
+
+    private func open(_ url: URL) async {
         cleanup()
-        source = movie.url
-        player = AVPlayer(url: movie.url)
-        let asset = AVURLAsset(url: movie.url)
+        source = url
+        player = AVPlayer(url: url)
+        let asset = AVURLAsset(url: url)
         duration = (try? await asset.load(.duration).seconds) ?? 0
         markEnd = min(duration, 30)
         if let track = try? await asset.loadTracks(withMediaType: .video).first,
@@ -285,7 +318,17 @@ struct ClipperView: View {
             status = "Creando clip \(i + 1) de \(clips.count)…"
             do {
                 let url = try await StudioExport.run(source: source, start: c.start, end: c.end, subtitles: subtitles, vertical: vertical && isHorizontal) { _ in }
-                _ = await store.addVideo(from: url, youtubeConnected: youtube.isConnected)
+                let id = await store.addVideo(from: url, youtubeConnected: youtube.isConnected)
+                if drive.isConnected && drive.useDrive {
+                    status = "Guardando clip \(i + 1) en Google Drive…"
+                    do {
+                        let did = try await drive.upload(url, name: "Clip \(i + 1) · \(Date.now.formatted(.dateTime.day().month().hour().minute())).mp4")
+                        store.update(id) { $0.driveID = did }
+                        store.deleteVideoFile(of: id)   // ya está en la nube: no ocupa espacio en el iPhone
+                    } catch {
+                        store.show("Clip \(i + 1) quedó en el iPhone: \(error.localizedDescription)")
+                    }
+                }
                 made += 1
             } catch {
                 store.show("Clip \(i + 1): \(error.localizedDescription)")

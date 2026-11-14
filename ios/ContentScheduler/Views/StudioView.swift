@@ -99,7 +99,7 @@ struct StudioView: View {
     private func seek(_ s: Double) { player?.seek(to: CMTime(seconds: s, preferredTimescale: 600)) }
 
     private func load() async {
-        guard let source else { return }
+        guard let source = await Publisher.ensureFile(postID, store: store) else { return }
         player = AVPlayer(url: source)
         let asset = AVURLAsset(url: source)
         if let d = try? await asset.load(.duration) {

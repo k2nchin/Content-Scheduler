@@ -122,7 +122,7 @@ struct PostEditor: View {
                     Button { save(post) } label: { Text(saveLabel(post)) }
                         .buttonStyle(PrimaryButtonStyle()).disabled(uploading || busy)
                     HStack(spacing: 10) {
-                        if Publisher.fileURL(post) != nil && post.yt?.videoID == nil && post.fb == nil && post.ig == nil {
+                        if Publisher.hasVideo(post) && post.yt?.videoID == nil && post.fb == nil && post.ig == nil {
                             Button { studio = true } label: { Label("Estudio", systemImage: "wand.and.stars") }
                                 .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.fg))
                         }
@@ -183,7 +183,7 @@ struct PostEditor: View {
                         if !youtube.isConnected {
                             Text("YouTube sin conectar").bold()
                             Text("Conéctalo en Ajustes para subir este video.").font(.caption).foregroundStyle(Theme.muted)
-                        } else if Publisher.fileURL(post) == nil {
+                        } else if !Publisher.hasVideo(post) {
                             Text("Falta el archivo del video").bold()
                             PhotosPicker(selection: $pick, matching: .videos) { Label("Elegir video", systemImage: "video") }
                                 .font(.caption.bold())
@@ -234,7 +234,7 @@ struct PostEditor: View {
     }
 
     private func saveLabel(_ post: Post) -> String {
-        Publisher.fileURL(post) != nil && ((networks.contains(.youtube) && post.yt?.videoID == nil && youtube.isConnected) || wantsMeta)
+        Publisher.hasVideo(post) && ((networks.contains(.youtube) && post.yt?.videoID == nil && youtube.isConnected) || wantsMeta)
             ? "Guardar y programar" : "Guardar"
     }
 
@@ -273,9 +273,9 @@ struct PostEditor: View {
         let changed = result.changed, p = result.post
         if p.status == .error { store.update(postID) { $0.status = .scheduled; $0.errorMessage = nil } }
         dismiss()
-        let ytUpload = networks.contains(.youtube) && youtube.isConnected && !uploaded && Publisher.fileURL(p) != nil
+        let ytUpload = networks.contains(.youtube) && youtube.isConnected && !uploaded && Publisher.hasVideo(p)
         let ytUpdate = networks.contains(.youtube) && youtube.isConnected && uploaded && changed && p.yt?.state != .published
-        let metaNow = wantsMeta && Publisher.fileURL(p) != nil
+        let metaNow = wantsMeta && Publisher.hasVideo(p)
         if !ytUpload && !ytUpdate && !metaNow { return store.show("Guardado") }
         let (store, youtube, meta, id) = (store, youtube, meta, postID)
         Task {
@@ -290,7 +290,7 @@ struct PostEditor: View {
         dismiss()
         let (store, youtube, meta, id) = (store, youtube, meta, postID)
         let yt = networks.contains(.youtube) && youtube.isConnected
-        let hasFile = Publisher.fileURL(current) != nil
+        let hasFile = Publisher.hasVideo(current)
         Task {
             if yt && current.yt?.videoID != nil { await Publisher.update(id, now: true, store: store, yt: youtube) }
             else if yt && hasFile { await Publisher.upload(id, now: true, store: store, yt: youtube) }

@@ -7,6 +7,8 @@ struct SettingsView: View {
     @Environment(MetaService.self) private var meta
     @State private var connectingYT = false
     @State private var connectingMeta = false
+    @State private var connectingDrive = false
+    @State private var drive = DriveService.shared
     @State private var closing: YTChannel?
     @State private var confirmMeta = false
     @AppStorage("cs.lock") private var lock = false
@@ -104,6 +106,47 @@ struct SettingsView: View {
                             Text("TikTok").bold().foregroundStyle(Theme.muted)
                             Text("Próximamente").font(.caption).foregroundStyle(Theme.muted)
                         }
+                    }
+                }
+
+                SectionLabel(text: "Almacenamiento en la nube")
+                Card {
+                    if drive.isConnected {
+                        HStack(spacing: 12) {
+                            Image(systemName: "externaldrive.fill.badge.icloud").font(.title3).foregroundStyle(Theme.accent).frame(width: 32)
+                            VStack(alignment: .leading) {
+                                Text("Google Drive").bold()
+                                Text(drive.email ?? "").font(.caption).foregroundStyle(Theme.muted)
+                            }
+                            Spacer()
+                            Button("Desconectar") { drive.disconnect(); store.show("Google Drive desconectado") }
+                                .font(.caption.bold()).foregroundStyle(Theme.red).buttonStyle(.borderless)
+                        }
+                        Divider().overlay(Theme.line)
+                        Toggle(isOn: Binding(get: { drive.useDrive }, set: { drive.useDrive = $0 })) {
+                            VStack(alignment: .leading) {
+                                Text("Guardar los clips en Drive").bold()
+                                Text("Carpeta «Content Scheduler». No ocupan espacio en tu iPhone; se bajan solo al publicarse.").font(.caption).foregroundStyle(Theme.muted)
+                            }
+                        }
+                    } else {
+                        Button {
+                            connectingDrive = true
+                            Task {
+                                do { try await drive.connect(); store.show("Google Drive conectado") } catch { store.show(error.localizedDescription) }
+                                connectingDrive = false
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "externaldrive.badge.icloud").font(.title3).foregroundStyle(Theme.accent).frame(width: 32)
+                                VStack(alignment: .leading) {
+                                    Text(connectingDrive ? "Conectando…" : "Conectar Google Drive").bold()
+                                    Text("Para guardar tus clips en la nube. La app solo ve los archivos que ella crea.").font(.caption).foregroundStyle(Theme.muted)
+                                }
+                                Spacer()
+                                Image(systemName: "plus.circle").foregroundStyle(Theme.accent).font(.title3)
+                            }.contentShape(Rectangle())
+                        }.buttonStyle(.plain)
                     }
                 }
 

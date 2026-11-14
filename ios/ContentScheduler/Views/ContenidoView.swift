@@ -245,7 +245,7 @@ struct ContenidoView: View {
 
     private func programarTodo() {
         guard youtube.isConnected else { return store.show("Conecta YouTube en Ajustes para programar.") }
-        let pending = store.porProgramar.filter { $0.networks.contains(.youtube) && Publisher.fileURL($0) != nil && $0.date > .now }
+        let pending = store.porProgramar.filter { $0.networks.contains(.youtube) && Publisher.hasVideo($0) && $0.date > .now }
         guard !pending.isEmpty else { return store.show("No hay videos listos para programar.") }
         working = true
         Task {
@@ -256,7 +256,7 @@ struct ContenidoView: View {
 
     private func publicarAhora() {
         guard youtube.isConnected else { return store.show("Conecta YouTube en Ajustes para publicar.") }
-        guard let next = store.porProgramar.first(where: { $0.networks.contains(.youtube) && Publisher.fileURL($0) != nil }) else {
+        guard let next = store.porProgramar.first(where: { $0.networks.contains(.youtube) && Publisher.hasVideo($0) }) else {
             return store.show("No hay videos con archivo en la cola.")
         }
         working = true

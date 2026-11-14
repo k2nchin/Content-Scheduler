@@ -36,6 +36,10 @@ Cada cambio en `ios/` compila la app en GitHub Actions (`.github/workflows/ios.y
 
 Hasta que Google verifique la app y pase la auditoría de la API de YouTube, los videos subidos quedan **privados**; la app lo marca como «YouTube lo dejó privado». La cuota gratuita alcanza para unas 6 subidas al día.
 
+### Google Drive (almacenamiento de clips)
+
+En Ajustes → **Conectar Google Drive**. Los clips del Clipper se guardan en la carpeta «Content Scheduler» de tu Drive y no en el iPhone; se bajan un momento solo al publicarse. Permiso `drive.file`: la app solo ve los archivos que ella misma crea. En Google Cloud: activa **Google Drive API** y agrega el alcance `.../auth/drive.file` en la pantalla de consentimiento.
+
 ### Configurar Facebook e Instagram
 
 1. En developers.facebook.com, en tu app de Meta: **Agregar producto → Inicio de sesión con Facebook**, y en **Configuración → Básica → Agregar plataforma → iOS** pon el bundle id `com.contentscheduler.app`.

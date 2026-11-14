@@ -91,6 +91,8 @@ struct Post: Codable, Identifiable, Hashable {
     var isVertical: Bool = true
     /// Nombre del archivo de video guardado en la app (Documents/videos). Se borra al terminar de subir.
     var videoFile: String?
+    /// Id del video en tu Google Drive (carpeta «Content Scheduler»).
+    var driveID: String?
     var thumbnail: Data?
     var gradient: Int = 0
     var errorMessage: String?

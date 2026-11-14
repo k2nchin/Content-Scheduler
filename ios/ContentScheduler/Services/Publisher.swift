@@ -3,6 +3,25 @@ import Foundation
 /// Une la cola de la app con YouTube: subir, actualizar, borrar y revisar estados.
 @MainActor
 enum Publisher {
+    /// El post tiene video, en el iPhone o en Drive.
+    static func hasVideo(_ p: Post) -> Bool { fileURL(p) != nil || p.driveID != nil }
+
+    /// Devuelve el video en el iPhone; si solo está en Drive, lo baja un momento.
+    static func ensureFile(_ id: UUID, store: AppStore) async -> URL? {
+        guard let p = store.post(id) else { return nil }
+        if let url = fileURL(p) { return url }
+        guard let did = p.driveID else { return nil }
+        guard DriveService.shared.isConnected else { store.show("Conecta Google Drive en Ajustes para usar este video."); return nil }
+        do {
+            let url = try await DriveService.shared.download(did)
+            store.update(id) { $0.videoFile = url.lastPathComponent }
+            return url
+        } catch {
+            store.show(error.localizedDescription)
+            return nil
+        }
+    }
+
     static func fileURL(_ post: Post) -> URL? {
         guard let name = post.videoFile else { return nil }
         let url = AppStore.videosDir.appendingPathComponent(name)
@@ -10,7 +29,7 @@ enum Publisher {
     }
 
     static func upload(_ id: UUID, now: Bool, store: AppStore, yt: YouTubeService) async {
-        guard let post = store.post(id), let file = fileURL(post) else {
+        guard let post = store.post(id), let file = await ensureFile(id, store: store) else {
             store.show("Falta el archivo del video. Elígelo otra vez.")
             return
         }
@@ -112,7 +131,7 @@ enum Publisher {
     static func caption(_ p: Post, _ n: Network) -> String { (p.text(for: n) + "\n\n" + p.tags).trimmingCharacters(in: .whitespacesAndNewlines) }
 
     static func publishMeta(_ id: UUID, now: Bool, store: AppStore, meta: MetaService) async {
-        guard let p = store.post(id), let file = fileURL(p) else { return }
+        guard let p = store.post(id), let file = await ensureFile(id, store: store) else { return }
         if p.networks.contains(.facebook), meta.facebookConnected, p.fb?.id == nil {
             store.update(id) { $0.fb = NetInfo(state: .working) }
             do {
@@ -138,7 +157,7 @@ enum Publisher {
     }
 
     static func publishInstagram(_ id: UUID, store: AppStore, meta: MetaService) async {
-        guard let p = store.post(id), let file = fileURL(p) else { return }
+        guard let p = store.post(id), let file = await ensureFile(id, store: store) else { return }
         store.update(id) { $0.ig = NetInfo(state: .working) }
         do {
             let mid = try await meta.publishInstagram(file: file, caption: caption(p, .instagram))
