@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import PhotosUI
 
 struct PostEditor: View {
@@ -13,6 +14,7 @@ struct PostEditor: View {
     @State private var custom: [String: String] = [:]
     @State private var firstComment = ""
     @State private var aiTags = false
+    @State private var aiWriting = false
     @State private var perNetwork = false
     @State private var studio = false
     @State private var networks: Set<Network> = []
@@ -47,6 +49,10 @@ struct PostEditor: View {
                     TextField("#musica #envivo", text: $tags).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10))
                     if NIM.isConfigured {
+                        Button { Task { await writeWithAI() } } label: {
+                            Label(aiWriting ? "Escuchando el video y escribiendo…" : "✨ Escribir título, textos y hashtags con IA", systemImage: "wand.and.stars")
+                        }
+                        .font(.caption.bold()).foregroundStyle(Theme.accent).disabled(aiWriting)
                         Button {
                             aiTags = true
                             Task {
@@ -245,6 +251,32 @@ struct PostEditor: View {
         if i == nil && n == .instagram { return "Se publica a la hora elegida (Instagram no permite programar por API)." }
         if i == nil { return "Facebook lo programa y lo publica solo a la hora elegida." }
         return ""
+    }
+
+    /// Escucha el primer minuto del video y escribe título, texto por red y hashtags.
+    private func writeWithAI() async {
+        aiWriting = true
+        defer { aiWriting = false }
+        var spoken = ""
+        if let file = await Publisher.ensureFile(postID, store: store) {
+            let asset = AVURLAsset(url: file)
+            let dur = (try? await asset.load(.duration).seconds) ?? 60
+            let range = CMTimeRange(start: .zero, end: CMTime(seconds: min(60, dur), preferredTimescale: 600))
+            if let audio = try? await StudioExport.exportAudio(asset, range: range) {
+                spoken = ((try? await StudioExport.transcribe(audio)) ?? []).map(\.text).joined(separator: " ")
+                try? FileManager.default.removeItem(at: audio)
+            }
+        }
+        do {
+            let p = try await NIM.writePost(transcript: spoken.isEmpty ? "(sin voz; usa el título)" : spoken, currentTitle: title, networks: Array(networks))
+            if !p.title.isEmpty { title = String(p.title.prefix(100)) }
+            for (n, t) in [(Network.youtube, p.youtube), (.instagram, p.instagram), (.facebook, p.facebook)] {
+                if let t, !t.isEmpty { custom[n.rawValue] = n == .youtube ? String(t.prefix(100)) : t }
+            }
+            perNetwork = true
+            if let h = p.hashtags, !h.isEmpty { tags = h.joined(separator: " ") }
+            store.show("Listo: revisa los textos antes de guardar")
+        } catch { store.show(error.localizedDescription) }
     }
 
     private func saveLabel(_ post: Post) -> String {

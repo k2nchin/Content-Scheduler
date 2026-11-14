@@ -10,6 +10,8 @@ struct CalendarView: View {
     @State private var targetTime: Date?
     @State private var hours: [YouTubeService.HourStat] = []
     @State private var loadingHours = false
+    @State private var advice: String?
+    @State private var advising = false
     @State private var newSlot = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: .now) ?? .now
 
     private var days: [Date] {
@@ -125,6 +127,17 @@ struct CalendarView: View {
             if !top.isEmpty {
                 Text("Vistas promedio de tus videos según la hora en que se publicaron (\(hours.reduce(0) { $0 + $1.videos }) videos).")
                     .font(.caption).foregroundStyle(Theme.muted)
+                if NIM.isConfigured {
+                    Button {
+                        advising = true
+                        Task {
+                            do { advice = try await NIM.timeAdvice(hours: hours, videos: try await youtube.topVideos()) } catch { store.show(error.localizedDescription) }
+                            advising = false
+                        }
+                    } label: { Label(advising ? "Analizando…" : "✨ Consejo de la IA", systemImage: "sparkles") }
+                        .buttonStyle(BoxButtonStyle()).disabled(advising)
+                    if let advice { Text(advice).font(.footnote) }
+                }
                 Button {
                     store.state.slots = top.map { String(format: "%02d:00", $0.hour) }.sorted()
                     store.show("Horarios cambiados a tus mejores horas")

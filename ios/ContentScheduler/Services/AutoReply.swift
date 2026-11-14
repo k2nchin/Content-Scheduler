@@ -74,6 +74,7 @@ enum AutoReply {
     static func smartReply(for c: YouTubeService.Comment, network: Network, account: String?) async -> String? {
         if c.replied || answered.contains(c.id) { return nil }
         if skipBlocked && isSpam(c) { return nil }
+        if let k = NIM.kind(of: c.id), k == .spam || k.needsYou { return nil }   // preguntas, críticas y colaboraciones: te las deja a ti
         let t = c.text.lowercased()
         if let rule = rules.first(where: { r in r.keys.contains { t.contains($0) } }) { return fill(rule.reply, c) }
         if useAI && NIM.isConfigured {

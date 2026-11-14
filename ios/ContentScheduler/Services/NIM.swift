@@ -6,9 +6,15 @@ enum NIM {
     static let endpoint = URL(string: "https://integrate.api.nvidia.com/v1/chat/completions")!
     /// Tareas de la app; cada una usa el modelo que mejor le va (con respaldos si alguno no está disponible).
     enum Job: String {
-        case clips, replies, hashtags
+        case clips, replies, hashtags, vision, write, analysis
         var models: [String] {
             switch self {
+            // Ver imágenes (elegir portada) → modelos con visión.
+            case .vision: ["nvidia/nemotron-3.5-super-vl-120b-a12b", "meta/llama-3.2-90b-vision-instruct"]
+            // Escribir títulos, descripciones y ganchos → rápido y con buena redacción.
+            case .write: ["deepseek-ai/deepseek-v4.1-flash", "z-ai/glm-5.3-flash", "nvidia/nemotron-3.5-lightning-30b-a3b"]
+            // Analizar comentarios, estadísticas e ideas → razonamiento rápido.
+            case .analysis: ["deepseek-ai/deepseek-v4.1-flash", "nvidia/nemotron-3-super-120b-a12b", "nvidia/nemotron-3.5-lightning-30b-a3b"]
             // Clipping: rápido y con contexto largo para leer toda la transcripción → modelos «flash».
             case .clips: ["deepseek-ai/deepseek-v4.1-flash", "nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3-super-120b-a12b"]
             // Comentarios: que suene a persona → modelo de escritura creativa, con respaldos naturales en español.
@@ -60,10 +66,15 @@ enum NIM {
     static func save(key: String) { key.isEmpty ? Keychain.delete("nim.key") : Keychain.set(key, for: "nim.key") }
 
     static func chat(_ job: Job, system: String, user: String, maxTokens: Int = 800, temperature: Double = 0.4) async throws -> String {
+        try await chat(job, system: system, content: user, maxTokens: maxTokens, temperature: temperature)
+    }
+
+    /// Igual que chat, pero el contenido puede llevar imágenes (para modelos con visión).
+    static func chat(_ job: Job, system: String, content: Any, maxTokens: Int = 800, temperature: Double = 0.4) async throws -> String {
         var last: Error = YTError(message: "Ningún modelo de NVIDIA respondió.")
         for m in candidates(job) {
             do {
-                let out = try await chat(model: m, system: system, user: user, maxTokens: maxTokens, temperature: temperature)
+                let out = try await chat(model: m, system: system, content: content, maxTokens: maxTokens, temperature: temperature)
                 UserDefaults.standard.set(m, forKey: "nim.ok.\(job.rawValue)")
                 return out
             } catch let e as ModelMissing {
@@ -76,7 +87,7 @@ enum NIM {
 
     private struct ModelMissing: Error { let model: String }
 
-    private static func chat(model: String, system: String, user: String, maxTokens: Int, temperature: Double) async throws -> String {
+    private static func chat(model: String, system: String, content: Any, maxTokens: Int, temperature: Double) async throws -> String {
         guard let key else { throw YTError(message: "Pon tu clave de NVIDIA en Ajustes → IA.") }
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
@@ -85,7 +96,7 @@ enum NIM {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: [
             "model": model, "temperature": temperature, "max_tokens": maxTokens,
-            "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
+            "messages": [["role": "system", "content": system], ["role": "user", "content": content]],
         ])
         let (data, resp) = try await URLSession.shared.data(for: req)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
@@ -138,6 +149,7 @@ enum NIM {
         Si te piden más contenido, invítalos a seguirte o a activar notificaciones, de forma natural.
         \(tone == "dominicano" ? dominican : "Usa un español neutro y cercano.")
         Si el comentario está en inglés u otro idioma, responde en ese idioma con el mismo buen ambiente.
+        \(StyleMemory.examples)
         Si el comentario es spam, un insulto, odio o no tiene sentido, responde exactamente: SKIP
         Responde solo con el texto de la respuesta.
         """

@@ -21,7 +21,7 @@ struct CommentsView: View {
     @AppStorage("cs.skipBlocked") private var skipBlocked = true
     @AppStorage("cs.autoReply") private var autoReply = true
 
-    enum Show: String, CaseIterable { case pendientes = "Pendientes", todos = "Todos", spam = "Spam" }
+    enum Show: String, CaseIterable { case pendientes = "Pendientes", paraTi = "Para ti", todos = "Todos", spam = "Spam" }
 
     @State private var comments: [YouTubeService.Comment] = []
     @State private var drafts: [String: String] = [:]
@@ -30,6 +30,8 @@ struct CommentsView: View {
     @State private var loading = false
     @State private var sending: Set<String> = []
     @State private var suggesting: Set<String> = []
+    @State private var summary: String?
+    @State private var summarizing = false
     @State private var editing = false
     @State private var confirmAll = false
 
@@ -37,7 +39,12 @@ struct CommentsView: View {
     private var pending: [YouTubeService.Comment] { comments.filter { !$0.replied && !AutoReply.answered.contains($0.id) && !AutoReply.isSpam($0) } }
     private var spam: [YouTubeService.Comment] { comments.filter { !$0.replied && AutoReply.isSpam($0) } }
     private var shown: [YouTubeService.Comment] {
-        let base: [YouTubeService.Comment] = switch show { case .pendientes: pending; case .todos: comments; case .spam: spam }
+        let base: [YouTubeService.Comment] = switch show {
+        case .pendientes: pending
+        case .paraTi: comments.filter { !$0.replied && !AutoReply.answered.contains($0.id) && (NIM.kind(of: $0.id)?.needsYou ?? false) }
+        case .todos: comments
+        case .spam: spam
+        }
         let q = search.trimmingCharacters(in: .whitespaces).lowercased()
         return q.isEmpty ? base : base.filter { $0.text.lowercased().contains(q) || $0.author.lowercased().contains(q) }
     }
@@ -109,6 +116,22 @@ struct CommentsView: View {
                     Button { confirmAll = true } label: { Label("Responder a todos los pendientes", systemImage: "bubble.left.and.bubble.right").frame(maxWidth: .infinity) }
                         .buttonStyle(BoxButtonStyle())
                 }
+                if NIM.isConfigured && !comments.isEmpty {
+                    Button {
+                        summarizing = true
+                        Task {
+                            do { summary = try await NIM.summary(comments) } catch { store.show(error.localizedDescription) }
+                            summarizing = false
+                        }
+                    } label: { Label(summarizing ? "Leyendo comentarios…" : "✨ Resumen de lo que dice tu gente", systemImage: "text.quote").frame(maxWidth: .infinity) }
+                        .buttonStyle(BoxButtonStyle()).disabled(summarizing)
+                    if let summary {
+                        Box {
+                            Text("RESUMEN").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                            Text(summary).font(.footnote)
+                        }
+                    }
+                }
                 if loading { ProgressView().frame(maxWidth: .infinity).padding() }
                 if !loading && shown.isEmpty {
                     Text(show == .pendientes ? "No tienes comentarios pendientes. 🎉" : "Nada por aquí.")
@@ -144,6 +167,12 @@ struct CommentsView: View {
         return Box {
             HStack(alignment: .firstTextBaseline) {
                 Text(c.author).font(.subheadline.bold()).lineLimit(1)
+                if let k = NIM.kind(of: c.id), k != .otro {
+                    Text(k.label.uppercased()).font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(k.needsYou ? Theme.accent : k == .spam ? Theme.warn : Theme.ok)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background((k.needsYou ? Theme.accent : k == .spam ? Theme.warn : Theme.ok).opacity(0.15))
+                }
                 if AutoReply.isSpam(c) {
                     Text("SPAM").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(Theme.warn)
                         .padding(.horizontal, 5).padding(.vertical, 2).background(Theme.warn.opacity(0.15))
@@ -197,6 +226,10 @@ struct CommentsView: View {
         defer { loading = false }
         do {
             comments = network == .youtube ? try await youtube.comments() : try await meta.comments(network)
+            if NIM.isConfigured {
+                try? await NIM.classify(comments.filter { !$0.replied })
+                comments = comments   // refresca las etiquetas
+            }
             if autoReply { await runAuto() }
         } catch {
             store.show(error.localizedDescription)
@@ -219,6 +252,7 @@ struct CommentsView: View {
         defer { sending.remove(c.id) }
         do {
             try await sendReply(network, c, t)
+            StyleMemory.add(comment: c.text, reply: t)
             AutoReply.answered.insert(c.id)
             if let i = comments.firstIndex(where: { $0.id == c.id }) { comments[i].replied = true }
             drafts[c.id] = nil

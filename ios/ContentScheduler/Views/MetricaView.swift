@@ -14,6 +14,8 @@ struct MetricaView: View {
     @AppStorage("cs.autoRefresh") private var auto = true
     @State private var metric: Metric = .seguidores
     @State private var refreshing = false
+    @State private var ideas: [String] = []
+    @State private var thinking = false
 
     private var connected: Bool {
         switch network {
@@ -85,6 +87,26 @@ struct MetricaView: View {
             }
 
             if network == .youtube { YTAccountPicker() }
+            if network == .youtube && youtube.isConnected && NIM.isConfigured {
+                Box {
+                    Text("IDEAS DE CONTENIDO").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                    Text("La IA mira qué videos tuyos funcionaron mejor y te propone qué grabar.").font(.caption).foregroundStyle(Theme.muted)
+                    Button {
+                        thinking = true
+                        Task {
+                            do { ideas = try await NIM.ideas(videos: try await youtube.topVideos()) } catch { store.show(error.localizedDescription) }
+                            thinking = false
+                        }
+                    } label: { Label(thinking ? "Pensando…" : "✨ Darme ideas", systemImage: "lightbulb") }
+                        .buttonStyle(BoxButtonStyle(filled: true)).disabled(thinking)
+                    ForEach(Array(ideas.enumerated()), id: \.offset) { i, idea in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("\(i + 1)").font(.system(size: 12, weight: .bold, design: .monospaced)).foregroundStyle(Theme.accent)
+                            Text(idea).font(.footnote)
+                        }
+                    }
+                }
+            }
             if compare { compareView } else { detailView }
         }
         .onChange(of: youtube.activeID) { _, _ in Task { await refresh() } }

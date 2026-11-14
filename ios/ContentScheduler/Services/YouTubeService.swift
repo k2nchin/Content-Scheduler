@@ -293,6 +293,25 @@ final class YouTubeService: NSObject {
         (UserDefaults.standard.data(forKey: "yt.snapshots.\(channel?.id ?? "")").flatMap { try? JSONDecoder().decode([Snapshot].self, from: $0) }) ?? []
     }
 
+    struct TopVideo { let title: String; let views: Int; let date: Date }
+
+    /// Tus últimos 50 videos con sus vistas y fecha.
+    func topVideos() async throws -> [TopVideo] {
+        guard let ch = channel else { return [] }
+        let c = try await api("GET", "channels?part=contentDetails&id=\(ch.id)")
+        guard let uploads = (((c["items"] as? [[String: Any]])?.first?["contentDetails"] as? [String: Any])?["relatedPlaylists"] as? [String: Any])?["uploads"] as? String else { return [] }
+        let pl = try await api("GET", "playlistItems?part=contentDetails&playlistId=\(uploads)&maxResults=50")
+        let ids = (pl["items"] as? [[String: Any]] ?? []).compactMap { ($0["contentDetails"] as? [String: Any])?["videoId"] as? String }
+        guard !ids.isEmpty else { return [] }
+        let v = try await api("GET", "videos?part=snippet,statistics&id=\(ids.joined(separator: ","))")
+        let iso = ISO8601DateFormatter()
+        return (v["items"] as? [[String: Any]] ?? []).compactMap { item in
+            let sn = item["snippet"] as? [String: Any] ?? [:]
+            guard let date = iso.date(from: sn["publishedAt"] as? String ?? "") else { return nil }
+            return TopVideo(title: sn["title"] as? String ?? "", views: Int((item["statistics"] as? [String: Any])?["viewCount"] as? String ?? "") ?? 0, date: date)
+        }.sorted { $0.views > $1.views }
+    }
+
     struct HourStat: Identifiable { let hour: Int; let avgViews: Double; let videos: Int; var id: Int { hour } }
 
     /// Vistas promedio según la hora (de tu iPhone) en que se publicaron tus últimos 50 videos.

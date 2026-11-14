@@ -62,15 +62,31 @@ struct ContentSchedulerApp: App {
         guard AutoReply.enabled else { return [:] }
         var done: [Network: Int] = [:]
         if yt.isConnected, let list = try? await yt.comments() {
+            await flagImportant(list, network: .youtube)
             done[.youtube] = await AutoReply.run(list, yt: yt)
         }
         for n in [Network.facebook, .instagram] where (n == .facebook ? meta.facebookConnected : meta.instagramConnected) {
             if let list = try? await meta.comments(n) {
+                await flagImportant(list, network: n)
                 let acc = n == .facebook ? meta.page?.name : meta.page?.igUsername
                 done[n] = await AutoReply.run(list, network: n, account: acc) { c, text in try await meta.reply(n, to: c.commentID, text: text) }
             }
         }
         return done.filter { $0.value > 0 }
+    }
+
+    /// Clasifica con IA y te avisa de preguntas y colaboraciones nuevas (esas no se responden solas).
+    @MainActor
+    static func flagImportant(_ list: [YouTubeService.Comment], network: Network) async {
+        guard NIM.isConfigured else { return }
+        let pending = list.filter { !$0.replied && !AutoReply.answered.contains($0.id) }
+        let before = Set(pending.filter { NIM.kind(of: $0.id) != nil }.map(\.id))
+        try? await NIM.classify(pending)
+        let fresh = pending.filter { !before.contains($0.id) }
+        let collab = fresh.filter { NIM.kind(of: $0.id) == .colaboracion }.count
+        let questions = fresh.filter { NIM.kind(of: $0.id) == .pregunta }.count
+        if collab > 0 { Notifier.send("💼 Posible colaboración en \(network.name)", "Tienes \(collab) \(collab == 1 ? "comentario" : "comentarios") de colaboración o negocio para responder tú.") }
+        if questions > 0 { Notifier.send("❓ Preguntas en \(network.name)", "\(questions) \(questions == 1 ? "pregunta espera" : "preguntas esperan") tu respuesta.") }
     }
 
     @MainActor

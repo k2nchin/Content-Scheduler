@@ -36,6 +36,7 @@ struct ClipperView: View {
 
     @State private var vertical = true
     @State private var subtitles = true
+    @State private var hooks = true
     @State private var working = false
     @State private var status = ""
 
@@ -267,6 +268,15 @@ struct ClipperView: View {
                 }
                 Divider().overlay(Theme.line)
             }
+            if clips.contains(where: { !($0.ai?.hook ?? "").isEmpty }) {
+                Toggle(isOn: $hooks) {
+                    VStack(alignment: .leading) {
+                        Text("Gancho en pantalla").bold()
+                        Text("Pone el gancho de la IA arriba en los primeros 3 segundos de cada clip.").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                }
+                Divider().overlay(Theme.line)
+            }
             Toggle(isOn: $subtitles) {
                 VStack(alignment: .leading) {
                     Text("Subtítulos automáticos").bold()
@@ -408,7 +418,8 @@ struct ClipperView: View {
         for (i, c) in clips.enumerated() {
             status = "Creando clip \(i + 1) de \(clips.count)…"
             do {
-                let url = try await StudioExport.run(source: source, start: c.start, end: c.end, subtitles: subtitles, vertical: vertical && isHorizontal) { _ in }
+                let url = try await StudioExport.run(source: source, start: c.start, end: c.end, subtitles: subtitles, vertical: vertical && isHorizontal,
+                                                       hook: hooks ? c.ai?.hook : nil) { _ in }
                 let id = await store.addVideo(from: url, youtubeConnected: youtube.isConnected)
                 if let ai = c.ai {
                     store.update(id) {

@@ -17,6 +17,9 @@ struct StudioView: View {
     @State private var isHorizontal = false
     @State private var coverTime = 0.0
     @State private var coverImage: UIImage?
+    @State private var useHook = false
+    @State private var hookText = ""
+    @State private var aiBusy = false
     @State private var working = false
     @State private var status = ""
 
@@ -56,6 +59,10 @@ struct StudioView: View {
                             .frame(width: 72, height: 110).clipShape(RoundedRectangle(cornerRadius: 8))
                             VStack(alignment: .leading, spacing: 6) {
                                 Slider(value: $coverTime, in: 0...duration) { editing in if !editing { Task { await grabCover() } } }
+                                if NIM.isConfigured {
+                                    Button { Task { await aiCover() } } label: { Label(aiBusy ? "Mirando el video…" : "✨ Elegir portada con IA", systemImage: "photo") }
+                                        .font(.caption.bold()).foregroundStyle(Theme.accent).disabled(aiBusy)
+                                }
                                 Text("Elige el momento para la portada (\(clock(coverTime))). En YouTube se sube como miniatura; tu canal tiene que estar verificado por teléfono.")
                                     .font(.caption).foregroundStyle(Theme.muted)
                             }
@@ -68,6 +75,21 @@ struct StudioView: View {
                                     Text("Convertir a vertical 9:16").bold()
                                     Text("Para Reels y Shorts: el video queda al centro con el fondo difuminado.").font(.caption).foregroundStyle(Theme.muted)
                                 }
+                            }
+                        }
+                    }
+                    Box {
+                        Toggle(isOn: $useHook) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Gancho en pantalla").bold()
+                                Text("Texto grande arriba durante los primeros 3 segundos.").font(.caption).foregroundStyle(Theme.muted)
+                            }
+                        }
+                        if useHook {
+                            TextField("Ej.: Nadie esperaba esto 😳", text: $hookText).padding(10).background(Theme.bg3)
+                            if NIM.isConfigured {
+                                Button { Task { await aiHook() } } label: { Label(aiBusy ? "Escribiendo…" : "✨ Escribir gancho con IA", systemImage: "text.bubble") }
+                                    .font(.caption.bold()).foregroundStyle(Theme.accent).disabled(aiBusy)
                             }
                         }
                     }
@@ -115,6 +137,43 @@ struct StudioView: View {
         await grabCover()
     }
 
+    /// La IA mira 6 momentos del video y elige el mejor para portada.
+    private func aiCover() async {
+        guard let source else { return }
+        aiBusy = true
+        defer { aiBusy = false }
+        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: source))
+        gen.appliesPreferredTrackTransform = true
+        gen.maximumSize = CGSize(width: 720, height: 720)
+        let times = (0..<6).map { start + (end - start) * (Double($0) + 0.5) / 6 }
+        var frames: [(Double, UIImage)] = []
+        for t in times {
+            if let r = try? await gen.image(at: CMTime(seconds: t, preferredTimescale: 600)) { frames.append((t, UIImage(cgImage: r.image))) }
+        }
+        guard !frames.isEmpty else { return store.show("No se pudieron leer imágenes del video.") }
+        do {
+            let i = try await NIM.bestFrame(frames.map(\.1))
+            coverTime = frames[i].0
+            coverImage = frames[i].1
+            store.show("La IA eligió la portada")
+        } catch { store.show(error.localizedDescription) }
+    }
+
+    /// Gancho a partir de lo que se dice en el tramo elegido.
+    private func aiHook() async {
+        guard let source else { return }
+        aiBusy = true
+        defer { aiBusy = false }
+        do {
+            let asset = AVURLAsset(url: source)
+            let range = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600), end: CMTime(seconds: min(end, start + 60), preferredTimescale: 600))
+            let audio = try await StudioExport.exportAudio(asset, range: range)
+            let text = try await StudioExport.transcribe(audio).map(\.text).joined(separator: " ")
+            try? FileManager.default.removeItem(at: audio)
+            hookText = try await NIM.hook(for: text.isEmpty ? (store.post(postID)?.title ?? "") : text)
+        } catch { store.show(error.localizedDescription) }
+    }
+
     private func grabCover() async {
         guard let source else { return }
         let gen = AVAssetImageGenerator(asset: AVURLAsset(url: source))
@@ -129,7 +188,7 @@ struct StudioView: View {
         player?.pause()
         Task {
             do {
-                let url = try await StudioExport.run(source: source, start: start, end: end, subtitles: subtitles, vertical: vertical) { status = $0 }
+                let url = try await StudioExport.run(source: source, start: start, end: end, subtitles: subtitles, vertical: vertical, hook: useHook ? hookText : nil) { status = $0 }
                 if let coverImage, let jpeg = coverImage.jpegData(compressionQuality: 0.85) { store.update(postID) { $0.cover = jpeg } }
                 await store.replaceVideo(of: postID, with: url)
                 store.show(subtitles ? "Video recortado con subtítulos" : "Video recortado")
@@ -146,7 +205,7 @@ struct StudioView: View {
 enum StudioExport {
     struct Line { let text: String; let start: Double; let end: Double }
 
-    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, status: @escaping (String) -> Void) async throws -> URL {
+    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, hook: String? = nil, status: @escaping (String) -> Void) async throws -> URL {
         var source = source
         var start = start, end = end
         if vertical {
@@ -162,6 +221,10 @@ enum StudioExport {
             status("Escuchando el audio…")
             let audio = try await exportAudio(asset, range: range)
             lines = try await transcribe(audio)
+            if NIM.isConfigured && !lines.isEmpty {
+                status("Corrigiendo subtítulos con IA…")
+                lines = (try? await NIM.fixSubtitles(lines)) ?? lines
+            }
             try? FileManager.default.removeItem(at: audio)
             if lines.isEmpty { status("No se entendió voz; se recorta sin subtítulos…") }
         }
@@ -184,7 +247,8 @@ enum StudioExport {
         guard let export = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetHighestQuality) else {
             throw YTError(message: "No se pudo preparar la exportación.")
         }
-        if !lines.isEmpty {
+        let hookText = hook?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !lines.isEmpty || !hookText.isEmpty {
             let r = natural.applying(transform)
             let size = CGSize(width: abs(r.width), height: abs(r.height))
             let vc = AVMutableVideoComposition()
@@ -222,6 +286,29 @@ enum StudioExport {
                 show.isRemovedOnCompletion = true
                 text.add(show, forKey: "show")
                 parent.addSublayer(text)
+            }
+            if !hookText.isEmpty {
+                // Gancho grande arriba durante los primeros 3 segundos
+                let hookSize = size.width * 0.075
+                let box = CATextLayer()
+                box.string = NSAttributedString(string: hookText, attributes: [
+                    .font: UIFont.systemFont(ofSize: hookSize, weight: .black),
+                    .foregroundColor: UIColor.white,
+                ])
+                box.alignmentMode = .center
+                box.isWrapped = true
+                box.contentsScale = 2
+                box.backgroundColor = UIColor(red: 1, green: 0.04, blue: 0.54, alpha: 0.92).cgColor
+                box.cornerRadius = hookSize * 0.3
+                box.frame = CGRect(x: size.width * 0.07, y: size.height * 0.68, width: size.width * 0.86, height: hookSize * 2.7)
+                box.opacity = 0
+                let show = CABasicAnimation(keyPath: "opacity")
+                show.fromValue = 1; show.toValue = 1
+                show.beginTime = AVCoreAnimationBeginTimeAtZero
+                show.duration = 3
+                show.isRemovedOnCompletion = true
+                box.add(show, forKey: "hook")
+                parent.addSublayer(box)
             }
             vc.animationTool = AVVideoCompositionCoreAnimationTool(postProcessingAsVideoLayer: videoLayer, in: parent)
             export.videoComposition = vc
