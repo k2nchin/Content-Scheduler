@@ -93,6 +93,7 @@ struct RootView: View {
             Theme.bg.ignoresSafeArea()
             switch tab {
             case .contenido: ContenidoView()
+            case .clipper: ClipperView(inTab: true)
             case .horarios: CalendarView()
             case .metrica: MetricaView()
             case .comentarios: NavigationStack { CommentsView() }

@@ -222,11 +222,12 @@ struct PageTitle: View {
 }
 
 enum AppTab: String, CaseIterable, Identifiable {
-    case contenido, horarios, metrica, comentarios, ajustes
+    case contenido, clipper, horarios, metrica, comentarios, ajustes
     var id: String { rawValue }
     var label: String {
         switch self {
         case .contenido: "CONTENIDO"
+        case .clipper: "CLIPPER"
         case .horarios: "HORARIOS"
         case .metrica: "MÉTRICA"
         case .comentarios: "COMENT."
@@ -236,6 +237,7 @@ enum AppTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .contenido: "square.grid.2x2"
+        case .clipper: "scissors"
         case .horarios: "clock.arrow.circlepath"
         case .metrica: "chart.bar"
         case .comentarios: "bubble.left"

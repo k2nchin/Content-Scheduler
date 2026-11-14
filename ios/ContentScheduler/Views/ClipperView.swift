@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 
 /// Clipper: de un video largo saca varios clips cortos y los manda a la cola.
 struct ClipperView: View {
+    /// En la barra de abajo no hay botón «Cerrar».
+    var inTab = false
     @Environment(AppStore.self) private var store
     @Environment(YouTubeService.self) private var youtube
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +16,8 @@ struct ClipperView: View {
 
     @State private var pick: PhotosPickerItem?
     @State private var importingFile = false
+    @State private var ytLink = ""
+    @Environment(\.openURL) private var openURL
     private var drive: DriveService { DriveService.shared }
     @State private var source: URL?
     @State private var player: AVPlayer?
@@ -48,6 +52,19 @@ struct ClipperView: View {
                         .frame(maxWidth: .infinity).padding(.vertical, 34)
                         .overlay(Rectangle().strokeBorder(Theme.accent.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, dash: [5])))
                     }
+                    Box {
+                        Text("LINK DE TU VIDEO DE YOUTUBE").font(Theme.mono).tracking(1.6).foregroundStyle(Theme.muted)
+                        TextField("https://youtu.be/… o youtube.com/live/…", text: $ytLink)
+                            .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .padding(10).background(Theme.bg3)
+                        Button {
+                            guard let id = youtubeID(ytLink) else { return store.show("Ese no parece un link de YouTube.") }
+                            openURL(URL(string: "https://studio.youtube.com/video/\(id)/edit")!)
+                        } label: { Label("Abrir descarga en YouTube Studio", systemImage: "arrow.down.circle").frame(maxWidth: .infinity) }
+                            .buttonStyle(BoxButtonStyle(filled: true))
+                        Text("Solo funciona con videos de tu canal. En YouTube Studio toca ⋮ → Descargar, guárdalo en Archivos (o en Drive) y elígelo abajo con «Elegir desde Archivos».")
+                            .font(.caption).foregroundStyle(Theme.muted)
+                    }
                     Button { importingFile = true } label: {
                         Label("Elegir desde Archivos (Google Drive, iCloud…)", systemImage: "folder").frame(maxWidth: .infinity)
                     }.buttonStyle(BoxButtonStyle())
@@ -76,7 +93,9 @@ struct ClipperView: View {
                         .buttonStyle(PrimaryButtonStyle()).disabled(clips.isEmpty || working)
                 }
             }
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { cleanup(); dismiss() }.disabled(working) } }
+            .toolbar {
+                if !inTab { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { cleanup(); dismiss() }.disabled(working) } }
+            }
             .onChange(of: pick) { _, item in Task { await load(item) } }
             .fileImporter(isPresented: $importingFile, allowedContentTypes: [.movie, .video, .mpeg4Movie, .quickTimeMovie]) { result in
                 guard case .success(let url) = result else { return }
@@ -228,6 +247,16 @@ struct ClipperView: View {
 
     // MARK: Acciones
 
+    /// Saca el id del video de un link de YouTube (youtu.be, watch?v=, shorts, live).
+    private func youtubeID(_ link: String) -> String? {
+        guard let u = URLComponents(string: link.trimmingCharacters(in: .whitespacesAndNewlines)), let host = u.host?.lowercased(), host.contains("youtu") else { return nil }
+        if let v = u.queryItems?.first(where: { $0.name == "v" })?.value { return v }
+        let parts = u.path.split(separator: "/").map(String.init)
+        if host.contains("youtu.be") { return parts.first }
+        if let i = parts.firstIndex(where: { ["shorts", "live", "embed"].contains($0) }), i + 1 < parts.count { return parts[i + 1] }
+        return nil
+    }
+
     private func clock(_ s: Double) -> String {
         let t = Int(s)
         return t >= 3600 ? String(format: "%d:%02d:%02d", t / 3600, t % 3600 / 60, t % 60) : String(format: "%d:%02d", t / 60, t % 60)
@@ -338,7 +367,8 @@ struct ClipperView: View {
         if made > 0 {
             store.show("\(made) clips agregados a la cola")
             cleanup()
-            dismiss()
+            clips = []
+            if !inTab { dismiss() }
         }
     }
 
