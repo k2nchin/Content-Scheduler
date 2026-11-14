@@ -41,7 +41,7 @@ Hasta que Google verifique la app y pase la auditoría de la API de YouTube, los
 En Ajustes → **IA (NVIDIA NIM)** pegas tu clave de build.nvidia.com; se guarda en el Llavero del iPhone (no va en la `.ipa`). Con eso:
 - **Clipper → IA**: el iPhone transcribe el video y NIM elige los mejores momentos con puntaje de viralidad, gancho, títulos por red y hashtags.
 - **Comentarios**: «✨ Responder con IA» y respuesta automática con IA (las reglas por palabra van primero; spam e insultos no se responden).
-Modelo por defecto `meta/llama-3.3-70b-instruct` (se puede cambiar en Ajustes). Alternativa con servidor: carpeta `server/`.
+Modelos automáticos por tarea: clips con `nvidia/nemotron-3-super-120b-a12b` y comentarios con `nvidia/nemotron-3.5-lightning-30b-a3b`, cada uno con respaldos (se puede fijar otro en Ajustes). Alternativa con servidor: carpeta `server/`.
 
 ### Google Drive (almacenamiento de clips)
 

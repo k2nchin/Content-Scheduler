@@ -1,13 +1,15 @@
 // Content Scheduler · Clipper con IA (NVIDIA NIM): recibe la transcripción con tiempos y devuelve los mejores clips,
 // con puntaje de viralidad, gancho, títulos por red y hashtags.
 // La clave va en Vercel como NVIDIA_API_KEY (también se aceptan NIM_API_KEY o NVIDIA_NIM_API_KEY).
-// Modelo opcional: NIM_MODEL (por defecto meta/llama-3.3-70b-instruct).
+// Modelo opcional: NIM_MODEL. Por defecto nemotron-3-super-120b, con respaldos si no está disponible.
 
 const CLIENT_IDS = [
   '84783551840-mki8tk5nse0mh4idh09f88gi8csf59f1.apps.googleusercontent.com',  // iOS (Content Scheduler)
 ];
 const KEY = process.env.NVIDIA_API_KEY || process.env.NIM_API_KEY || process.env.NVIDIA_NIM_API_KEY;
-const MODEL = process.env.NIM_MODEL || 'meta/llama-3.3-70b-instruct';
+const MODELS = process.env.NIM_MODEL ? [process.env.NIM_MODEL]
+  : ['nvidia/nemotron-3-super-120b-a12b', 'nvidia/llama-3.1-nemotron-70b-instruct', 'mistralai/mistral-large-2-instruct'];
+const MODEL = MODELS[0];
 const recent = new Map();
 
 function send(res, status, data) {
@@ -54,7 +56,7 @@ function cleanClip(c, duration, minLen, maxLen) {
 }
 
 module.exports = async function clipAI(req, res) {
-  if (req.method === 'GET') return send(res, 200, {configured: Boolean(KEY), model: MODEL});
+  if (req.method === 'GET') return send(res, 200, {configured: Boolean(KEY), models: MODELS});
   if (req.method !== 'POST') return send(res, 405, {error: 'Método no permitido.'});
   if (!KEY) return send(res, 503, {error: 'La IA de NVIDIA no está configurada en este proyecto de Vercel.'});
 
@@ -94,23 +96,29 @@ Reglas:
 - score es de 0 a 100 según el potencial viral real; no infles los números.`;
 
   try {
-    const r = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.3,
-        max_tokens: 3000,
-        messages: [
-          {role: 'system', content: system},
-          {role: 'user', content: `Duración total: ${dur.toFixed(1)} s\nTranscripción:\n${transcript}`},
-        ],
-      }),
-      signal: AbortSignal.timeout(55_000),
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) return send(res, 502, {error: 'NVIDIA NIM: ' + (data?.detail || data?.error?.message || data?.title || r.status)});
-    const text = String(data?.choices?.[0]?.message?.content || '');
+    let data = null, used = null, lastErr = 'Ningún modelo de NVIDIA respondió.';
+    for (const model of MODELS) {
+      const r = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          model,
+          temperature: 0.3,
+          max_tokens: 6000,
+          messages: [
+            {role: 'system', content: system},
+            {role: 'user', content: `Duración total: ${dur.toFixed(1)} s\nTranscripción:\n${transcript}`},
+          ],
+        }),
+        signal: AbortSignal.timeout(55_000),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (r.ok) { data = body; used = model; break; }
+      lastErr = 'NVIDIA NIM: ' + (body?.detail || body?.error?.message || body?.title || r.status);
+      if (![404, 410, 400].includes(r.status)) return send(res, 502, {error: lastErr});
+    }
+    if (!data) return send(res, 502, {error: lastErr});
+    const text = String(data?.choices?.[0]?.message?.content || '').replace(/<think>[\s\S]*?<\/think>/g, '');
     const json = text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1);
     let parsed;
     try { parsed = JSON.parse(json); } catch { return send(res, 502, {error: 'La IA no devolvió un resultado válido. Inténtalo otra vez.'}); }
@@ -120,7 +128,7 @@ Reglas:
       .sort((a, b) => b.score - a.score)
       .filter((c, i, all) => !all.slice(0, i).some(o => c.start < o.end && c.end > o.start))
       .slice(0, n);
-    return send(res, 200, {clips, model: MODEL});
+    return send(res, 200, {clips, model: used});
   } catch (e) {
     return send(res, 504, {error: 'La IA tardó demasiado. Prueba con un video más corto o menos clips.'});
   }

@@ -128,7 +128,7 @@ struct SettingsView: View {
                     SecureField(nimSaved ? "Pega una clave nueva para cambiarla" : "Pega tu clave nvapi-…", text: $nimKey)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .padding(10).background(Theme.bg3)
-                    TextField("Modelo (vacío = \(NIM.defaultModel))", text: $nimModel)
+                    TextField("Modelo (vacío = automático: el mejor para cada tarea)", text: $nimModel)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().font(.footnote)
                         .padding(10).background(Theme.bg3)
                     HStack(spacing: 10) {

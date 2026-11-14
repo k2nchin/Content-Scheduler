@@ -4,7 +4,19 @@ import Foundation
 @MainActor
 enum NIM {
     static let endpoint = URL(string: "https://integrate.api.nvidia.com/v1/chat/completions")!
-    static let defaultModel = "meta/llama-3.3-70b-instruct"
+    /// Tareas de la app; cada una usa el modelo que mejor le va (con respaldos si alguno no está disponible).
+    enum Job: String {
+        case clips, replies
+        var models: [String] {
+            switch self {
+            // Elegir clips: transcripciones largas, razonamiento y JSON exacto → modelo grande con contexto largo.
+            case .clips: ["nvidia/nemotron-3-super-120b-a12b", "nvidia/llama-3.1-nemotron-70b-instruct", "mistralai/mistral-large-2-instruct"]
+            // Responder comentarios: rápido, natural y bueno en español → modelo ligero.
+            case .replies: ["nvidia/nemotron-3.5-lightning-30b-a3b", "nv-mistralai/mistral-nemo-12b-instruct", "nvidia/llama-3.1-nemotron-70b-instruct"]
+            }
+        }
+    }
+    static let defaultModel = "automático por tarea"
 
     /// Clave incluida al compilar (Secret NIM_API_KEY en GitHub). Solo para uso personal.
     static var embeddedKey: String? {
@@ -17,15 +29,52 @@ enum NIM {
         let k = Keychain.get("nim.key")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return k.isEmpty ? embeddedKey : k
     }
-    static var model: String {
+    /// Modelo elegido a mano en Ajustes (vacío = automático por tarea).
+    static var override: String? {
         let m = UserDefaults.standard.string(forKey: "nim.model")?.trimmingCharacters(in: .whitespaces) ?? ""
-        return m.isEmpty ? defaultModel : m
+        return m.isEmpty ? nil : m
+    }
+
+    /// Orden de modelos a probar: primero el que ya funcionó para esa tarea.
+    static func candidates(_ job: Job) -> [String] {
+        if let o = override { return [o] }
+        var list = job.models
+        if let ok = UserDefaults.standard.string(forKey: "nim.ok.\(job.rawValue)"), let i = list.firstIndex(of: ok) {
+            list.remove(at: i); list.insert(ok, at: 0)
+        }
+        return list
+    }
+
+    /// Quita el «pensamiento» que algunos modelos de razonamiento escriben antes de la respuesta.
+    private static func clean(_ s: String) -> String {
+        var t = s
+        while let a = t.range(of: "<think>"), let b = t.range(of: "</think>", range: a.upperBound..<t.endIndex) {
+            t.removeSubrange(a.lowerBound..<b.upperBound)
+        }
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     static var isConfigured: Bool { key != nil }
 
     static func save(key: String) { key.isEmpty ? Keychain.delete("nim.key") : Keychain.set(key, for: "nim.key") }
 
-    static func chat(system: String, user: String, maxTokens: Int = 800, temperature: Double = 0.4) async throws -> String {
+    static func chat(_ job: Job, system: String, user: String, maxTokens: Int = 800, temperature: Double = 0.4) async throws -> String {
+        var last: Error = YTError(message: "Ningún modelo de NVIDIA respondió.")
+        for m in candidates(job) {
+            do {
+                let out = try await chat(model: m, system: system, user: user, maxTokens: maxTokens, temperature: temperature)
+                UserDefaults.standard.set(m, forKey: "nim.ok.\(job.rawValue)")
+                return out
+            } catch let e as ModelMissing {
+                last = YTError(message: "El modelo \(e.model) no está disponible en NVIDIA NIM.")
+                continue
+            }
+        }
+        throw last
+    }
+
+    private struct ModelMissing: Error { let model: String }
+
+    private static func chat(model: String, system: String, user: String, maxTokens: Int, temperature: Double) async throws -> String {
         guard let key else { throw YTError(message: "Pon tu clave de NVIDIA en Ajustes → IA.") }
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
@@ -42,17 +91,17 @@ enum NIM {
         guard (200..<300).contains(status) else {
             if status == 401 || status == 403 { throw YTError(message: "NVIDIA no aceptó la clave. Revísala en Ajustes → IA.") }
             if status == 429 { throw YTError(message: "Se acabaron los créditos o el límite de NVIDIA por ahora.") }
-            if status == 404 { throw YTError(message: "Ese modelo no existe en NVIDIA NIM. Revisa el nombre en Ajustes → IA.") }
+            if status == 404 || status == 410 || (status == 400 && "\(json)".lowercased().contains("model")) { throw ModelMissing(model: model) }
             let msg = json["detail"] as? String ?? (json["error"] as? [String: Any])?["message"] as? String ?? "error \(status)"
             throw YTError(message: "NVIDIA NIM: \(msg)")
         }
         let content = (((json["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any])?["content"] as? String) ?? ""
-        return content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return clean(content)
     }
 
     /// Prueba rápida de la clave y el modelo.
     static func test() async throws -> String {
-        try await chat(system: "Responde solo con la palabra: listo", user: "prueba", maxTokens: 5, temperature: 0)
+        try await chat(.replies, system: "Responde solo con la palabra: listo", user: "prueba", maxTokens: 400, temperature: 0)
     }
 
     // MARK: Respuestas a comentarios
@@ -68,7 +117,7 @@ enum NIM {
         Si el comentario es spam, un insulto, odio o no tiene sentido, responde exactamente: SKIP
         Responde solo con el texto de la respuesta.
         """
-        let text = try await chat(system: system, user: comment, maxTokens: 120, temperature: 0.7)
+        let text = try await chat(.replies, system: system, user: comment, maxTokens: 600, temperature: 0.7)
             .trimmingCharacters(in: CharacterSet(charactersIn: "\"“”").union(.whitespacesAndNewlines))
         if text.isEmpty || text.uppercased().hasPrefix("SKIP") { return nil }
         return String(text.prefix(500))
@@ -91,8 +140,8 @@ enum NIM {
         {"clips":[{"start":0,"end":0,"score":0,"hook":"frase de gancho","reason":"por qué funciona","titles":{"youtube":"","instagram":"","facebook":""},"hashtags":["",""]}]}
         - score es de 0 a 100 según el potencial viral real; no infles los números.
         """
-        let raw = try await chat(system: system, user: String(format: "Duración total: %.1f s\nTranscripción:\n", duration) + transcript,
-                                 maxTokens: 3000, temperature: 0.3)
+        let raw = try await chat(.clips, system: system, user: String(format: "Duración total: %.1f s\nTranscripción:\n", duration) + transcript,
+                                 maxTokens: 6000, temperature: 0.3)
         guard let a = raw.firstIndex(of: "{"), let b = raw.lastIndex(of: "}") else {
             throw YTError(message: "La IA no devolvió un resultado válido. Inténtalo otra vez.")
         }
