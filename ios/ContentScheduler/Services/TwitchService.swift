@@ -208,7 +208,7 @@ final class TwitchService: NSObject {
         lastEvent = "Vigilando el chat de \(ch)…"
         listen(task)
         statusTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { Task { await self?.refreshStatus() } }
+            Task { @MainActor in await self?.refreshStatus() }
         }
         Task { while self.watching { try? await Task.sleep(for: .seconds(5)); self.evaluate() } }
     }
