@@ -35,6 +35,7 @@ struct ClipperView: View {
     @State private var levels: [Float] = []   // volumen por cada medio segundo
 
     @State private var vertical = true
+    @State private var track = true
     @State private var subtitles = true
     @State private var hooks = true
     @State private var working = false
@@ -263,9 +264,10 @@ struct ClipperView: View {
                 Toggle(isOn: $vertical) {
                     VStack(alignment: .leading) {
                         Text("Vertical 9:16").bold()
-                        Text("Para Reels y Shorts, con fondo difuminado.").font(.caption).foregroundStyle(Theme.muted)
+                        Text("Para Reels y Shorts.").font(.caption).foregroundStyle(Theme.muted)
                     }
                 }
+                if vertical { ReframePicker(track: $track) }
                 Divider().overlay(Theme.line)
             }
             if clips.contains(where: { !($0.ai?.hook ?? "").isEmpty }) {
@@ -418,7 +420,7 @@ struct ClipperView: View {
         for (i, c) in clips.enumerated() {
             status = "Creando clip \(i + 1) de \(clips.count)…"
             do {
-                let url = try await StudioExport.run(source: source, start: c.start, end: c.end, subtitles: subtitles, vertical: vertical && isHorizontal,
+                let url = try await StudioExport.run(source: source, start: c.start, end: c.end, subtitles: subtitles, vertical: vertical && isHorizontal, track: track,
                                                        hook: hooks ? c.ai?.hook : nil) { _ in }
                 let id = await store.addVideo(from: url, youtubeConnected: youtube.isConnected)
                 if let ai = c.ai {

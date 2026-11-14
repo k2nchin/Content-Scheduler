@@ -14,6 +14,7 @@ struct StudioView: View {
     @State private var end = 0.0
     @State private var subtitles = true
     @State private var vertical = false
+    @State private var track = true
     @State private var isHorizontal = false
     @State private var coverTime = 0.0
     @State private var coverImage: UIImage?
@@ -73,9 +74,10 @@ struct StudioView: View {
                             Toggle(isOn: $vertical) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Convertir a vertical 9:16").bold()
-                                    Text("Para Reels y Shorts: el video queda al centro con el fondo difuminado.").font(.caption).foregroundStyle(Theme.muted)
+                                    Text("Para Reels y Shorts.").font(.caption).foregroundStyle(Theme.muted)
                                 }
                             }
+                            if vertical { ReframePicker(track: $track) }
                         }
                     }
                     Box {
@@ -145,7 +147,9 @@ struct StudioView: View {
         let gen = AVAssetImageGenerator(asset: AVURLAsset(url: source))
         gen.appliesPreferredTrackTransform = true
         gen.maximumSize = CGSize(width: 720, height: 720)
-        let times = (0..<6).map { start + (end - start) * (Double($0) + 0.5) / 6 }
+        let span: Double = end - start
+        var times: [Double] = []
+        for k in 0..<6 { times.append(start + span * (Double(k) + 0.5) / 6.0) }
         var frames: [(Double, UIImage)] = []
         for t in times {
             if let r = try? await gen.image(at: CMTime(seconds: t, preferredTimescale: 600)) { frames.append((t, UIImage(cgImage: r.image))) }
@@ -188,7 +192,7 @@ struct StudioView: View {
         player?.pause()
         Task {
             do {
-                let url = try await StudioExport.run(source: source, start: start, end: end, subtitles: subtitles, vertical: vertical, hook: useHook ? hookText : nil) { status = $0 }
+                let url = try await StudioExport.run(source: source, start: start, end: end, subtitles: subtitles, vertical: vertical, track: track, hook: useHook ? hookText : nil) { status = $0 }
                 if let coverImage, let jpeg = coverImage.jpegData(compressionQuality: 0.85) { store.update(postID) { $0.cover = jpeg } }
                 await store.replaceVideo(of: postID, with: url)
                 store.show(subtitles ? "Video recortado con subtítulos" : "Video recortado")
@@ -205,12 +209,13 @@ struct StudioView: View {
 enum StudioExport {
     struct Line { let text: String; let start: Double; let end: Double }
 
-    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, hook: String? = nil, status: @escaping (String) -> Void) async throws -> URL {
+    static func run(source: URL, start: Double, end: Double, subtitles: Bool, vertical: Bool = false, track: Bool = true, hook: String? = nil, status: @escaping (String) -> Void) async throws -> URL {
         var source = source
         var start = start, end = end
         if vertical {
             status("Pasando a vertical 9:16…")
-            source = try await makeVertical(source, start: start, end: end)
+            source = track ? try await CameraTracker.render(source, start: start, end: end, status: status)
+                           : try await makeVertical(source, start: start, end: end)
             end -= start; start = 0
         }
         let asset = AVURLAsset(url: source)
@@ -416,5 +421,26 @@ enum StudioExport {
         }
         if !words.isEmpty { lines.append(Line(text: words.joined(separator: " "), start: from, end: to + 0.3)) }
         return lines
+    }
+}
+
+
+/// Cómo pasar a vertical: siguiendo a la persona (cámara virtual) o al centro con fondo difuminado.
+struct ReframePicker: View {
+    @Binding var track: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 0) {
+                Button { track = true } label: { Label("Seguir a la persona", systemImage: "person.crop.rectangle").frame(maxWidth: .infinity) }
+                    .font(.footnote).padding(.vertical, 9)
+                    .foregroundStyle(track ? .white : Theme.muted).background(track ? Theme.accent : Theme.bg2)
+                Button { track = false } label: { Label("Fondo difuminado", systemImage: "square.on.square").frame(maxWidth: .infinity) }
+                    .font(.footnote).padding(.vertical, 9)
+                    .foregroundStyle(!track ? .white : Theme.muted).background(!track ? Theme.accent : Theme.bg2)
+            }.overlay(Rectangle().strokeBorder(Theme.line))
+            Text(track ? "Una cámara virtual sigue la cara de quien habla, sin temblores, y llena toda la pantalla."
+                       : "El video entero queda al centro con el fondo difuminado.")
+                .font(.caption).foregroundStyle(Theme.muted)
+        }
     }
 }

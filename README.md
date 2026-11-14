@@ -18,6 +18,7 @@ La ventana de herramientas de Content Scheduler como app nativa para iPhone (Swi
 - **Texto distinto por red** y **duplicar** un post.
 - **Primer comentario** automático al publicarse (YouTube, Facebook, Instagram).
 - **Portada** elegida en el Estudio (se sube como miniatura en YouTube) y **convertir a vertical 9:16** con fondo difuminado.
+- **Seguimiento de cámara**: al pasar a 9:16, una cámara virtual sigue la cara de quien habla (Vision del iPhone: caras → cuerpo → lo más llamativo), sin temblores y con movimiento suave.
 - **Clipper** (en Contenido): de un video largo saca varios clips —a mano, en partes iguales o en los momentos con más energía del audio— y los manda a la cola, con opción vertical 9:16 y subtítulos.
 - **Reporte semanal** los lunes, **bloqueo con Face ID** y **copia de seguridad** (exportar/restaurar).
 
