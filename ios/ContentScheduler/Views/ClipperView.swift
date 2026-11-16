@@ -23,6 +23,7 @@ struct ClipperView: View {
     @State private var twitchOpen = false
     @State private var ytLiveOpen = false
     @State private var engineOpen = false
+    @State private var driveOpen = false
     @State private var fetchLink = ""
     @State private var fetching = false
     @State private var ytLink = ""
@@ -98,6 +99,11 @@ struct ClipperView: View {
             .sheet(isPresented: $twitchOpen) { TwitchView() }
             .sheet(isPresented: $ytLiveOpen) { YouTubeLiveView() }
             .sheet(isPresented: $engineOpen) { EngineClipView() }
+            .sheet(isPresented: $driveOpen) {
+                DriveBrowserView { file in
+                    Task { await loadFile(file); if source != nil { step = .ajustes } }
+                }
+            }
             .sheet(item: $preview) { m in
                 ResultPreview(made: m,
                               onQueue: { t, cut in Task { await queue(m, title: t, trim: cut) } },
@@ -171,8 +177,14 @@ struct ClipperView: View {
         PhotosPicker(selection: $pick, matching: .videos) {
             sourceCard("photo.on.rectangle", Theme.accent, "Video de tu galería", "Un en vivo, un ensayo, un podcast o un concierto.")
         }.buttonStyle(.plain)
+        if drive.isConnected {
+            Button { driveOpen = true } label: {
+                sourceCard("externaldrive.badge.icloud", Color(hex: 0x1A73E8), "Tu Google Drive",
+                           "Busca entre tus videos y elige el que quieras clipear.")
+            }.buttonStyle(.plain)
+        }
         Button { importingFile = true } label: {
-            sourceCard("folder", Color(hex: 0x1A73E8), "Archivos o Google Drive", "Para videos largos guardados en la nube.")
+            sourceCard("folder", Color(hex: 0x8E8E93), "Archivos del iPhone", "Lo que tengas guardado en el teléfono.")
         }.buttonStyle(.plain)
         Button { live = true } label: {
             sourceCard("record.circle", .red, "Clipping en vivo", "Graba con la cámara y te va dando clips.")

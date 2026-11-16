@@ -3,7 +3,8 @@ import AuthenticationServices
 import CryptoKit
 import UIKit
 
-/// Google Drive como almacenamiento de los clips. Permiso «drive.file»: la app solo ve los archivos que ella misma crea.
+/// Google Drive: guarda los clips y deja elegir videos tuyos para clipear.
+/// Solo puede escribir en lo que ella misma crea; de lo tuyo, solo leer.
 @Observable
 @MainActor
 final class DriveService: NSObject {
@@ -19,7 +20,9 @@ final class DriveService: NSObject {
 
     private var token: (value: String, exp: Date)?
     private var authSession: ASWebAuthenticationSession?
-    private let scope = "https://www.googleapis.com/auth/drive.file openid email"
+    /// `drive.file` para guardar lo que crea la app, y `drive.readonly` para
+    /// poder enseñarte tus videos y bajarlos. Nunca borra ni cambia nada tuyo.
+    private let scope = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly openid email"
 
     private var clientID: String { (Bundle.main.object(forInfoDictionaryKey: "GoogleClientID") as? String ?? "").trimmingCharacters(in: .whitespaces) }
     private var redirectScheme: String { clientID.split(separator: ".").reversed().joined(separator: ".") }
@@ -115,6 +118,10 @@ final class DriveService: NSObject {
             let msg = (json["error"] as? [String: Any])?["message"] as? String ?? "error \(status)"
             if status == 403 && msg.contains("has not been used") { throw YTError(message: "La API de Google Drive no está activada en Google Cloud.") }
             if status == 403 && msg.lowercased().contains("quota") { throw YTError(message: "Tu Google Drive está lleno.") }
+            // La conexión de antes no pedía permiso para leer tus videos.
+            if status == 403 || msg.lowercased().contains("insufficient") {
+                throw YTError(message: "Para ver tus videos hay que reconectar Drive: Ajustes → Google Drive → desconectar y conectar otra vez.")
+            }
             throw YTError(message: "Google Drive: \(msg)")
         }
         return json
@@ -156,6 +163,60 @@ final class DriveService: NSObject {
         let (d2, r2) = try await URLSession.shared.upload(for: put, fromFile: file)
         guard let id = try check(d2, r2)["id"] as? String else { throw YTError(message: "No se pudo guardar el video en Drive.") }
         return id
+    }
+
+    // MARK: Mirar lo que tienes
+
+    /// Un archivo o una carpeta de tu Drive.
+    struct Item: Identifiable, Hashable {
+        let id: String
+        let name: String
+        let isFolder: Bool
+        let size: Int
+        /// Cuándo se subió, para poder ordenar por lo más reciente.
+        let date: Date?
+
+        var sizeLabel: String {
+            guard size > 0 else { return "" }
+            let mb = Double(size) / 1_048_576
+            return mb >= 1024 ? String(format: "%.1f GB", mb / 1024) : String(format: "%.0f MB", mb)
+        }
+    }
+
+    /// Lo que hay en una carpeta: primero las carpetas, luego los videos.
+    /// Sin carpeta, lo de la raíz de tu Drive.
+    func list(in folder: String? = nil, search: String = "") async throws -> [Item] {
+        var condiciones = ["trashed = false"]
+        let limpio = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        if limpio.isEmpty {
+            condiciones.append("'\(folder ?? "root")' in parents")
+        } else {
+            // Al buscar se mira todo el Drive, no solo esta carpeta.
+            condiciones.append("name contains '\(limpio.replacingOccurrences(of: "'", with: "\\'"))'")
+        }
+        condiciones.append("(mimeType contains 'video/' or mimeType = 'application/vnd.google-apps.folder')")
+
+        var c = URLComponents(string: "https://www.googleapis.com/drive/v3/files")!
+        c.queryItems = [
+            .init(name: "q", value: condiciones.joined(separator: " and ")),
+            .init(name: "fields", value: "files(id,name,mimeType,size,modifiedTime)"),
+            .init(name: "orderBy", value: "folder,modifiedTime desc"),
+            .init(name: "pageSize", value: "200"),
+        ]
+        var req = URLRequest(url: c.url!)
+        req.setValue("Bearer \(try await accessToken())", forHTTPHeaderField: "Authorization")
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        let json = try check(data, resp)
+        let fechas = ISO8601DateFormatter()
+        return ((json["files"] as? [[String: Any]]) ?? []).compactMap { f in
+            guard let id = f["id"] as? String, let nombre = f["name"] as? String else { return nil }
+            let tipo = (f["mimeType"] as? String) ?? ""
+            return Item(id: id,
+                        name: nombre,
+                        isFolder: tipo == "application/vnd.google-apps.folder",
+                        size: Int((f["size"] as? String) ?? "") ?? 0,
+                        date: fechas.date(from: (f["modifiedTime"] as? String) ?? ""))
+        }
     }
 
     /// Baja un video de Drive a la carpeta de videos de la app (solo mientras se publica).
