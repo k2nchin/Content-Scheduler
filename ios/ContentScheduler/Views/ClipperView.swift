@@ -21,6 +21,7 @@ struct ClipperView: View {
     @State private var importingFile = false
     @State private var live = false
     @State private var twitchOpen = false
+    @State private var ytLiveOpen = false
     @State private var ytLink = ""
     @Environment(\.openURL) private var openURL
     private var drive: DriveService { DriveService.shared }
@@ -77,6 +78,7 @@ struct ClipperView: View {
             .onChange(of: pick) { _, item in Task { await load(item); if source != nil { step = .ajustes } } }
             .fullScreenCover(isPresented: $live) { LiveClipperView() }
             .sheet(isPresented: $twitchOpen) { TwitchView() }
+            .sheet(isPresented: $ytLiveOpen) { YouTubeLiveView() }
             .sheet(item: $preview) { m in ResultPreview(made: m, onQueue: { t in Task { await queue(m, title: t) } }, onDiscard: { discard(m) }) }
             .fileImporter(isPresented: $importingFile, allowedContentTypes: [.movie, .video, .mpeg4Movie, .quickTimeMovie]) { result in
                 guard case .success(let url) = result else { return }
@@ -131,6 +133,9 @@ struct ClipperView: View {
         }.buttonStyle(.plain)
         Button { twitchOpen = true } label: {
             sourceCard("dot.radiowaves.left.and.right", Color(hex: 0x9146FF), "Twitch", "Clipea un directo cuando el chat explota.")
+        }.buttonStyle(.plain)
+        Button { ytLiveOpen = true } label: {
+            sourceCard("play.rectangle.fill", Color(hex: 0xFF0000), "YouTube en vivo", "Marca los momentos en que el chat explota.")
         }.buttonStyle(.plain)
         if loading { ProgressView("Preparando video…").frame(maxWidth: .infinity) }
         Box {

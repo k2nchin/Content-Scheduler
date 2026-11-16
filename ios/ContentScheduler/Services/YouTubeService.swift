@@ -182,6 +182,8 @@ final class YouTubeService: NSObject {
         case (403, "insufficientPermissions"), (403, "ACCESS_TOKEN_SCOPE_INSUFFICIENT"):
             return YTError(message: "Falta el permiso de comentarios. Desconecta y vuelve a conectar YouTube en Ajustes.")
         case (_, "commentsDisabled"): return YTError(message: "Ese video tiene los comentarios desactivados.")
+        case (_, "liveChatEnded"): return YTError(message: "liveChatEnded")
+        case (_, "liveChatDisabled"): return YTError(message: "Ese directo no tiene el chat activado.")
         case (_, "invalidPublishAt"): return YTError(message: "YouTube no aceptó esa hora. Elige una hora futura.")
         default:
             if status == 403 && msg.contains("has not been used") { return YTError(message: "La API de YouTube no está activada en Google Cloud.") }
@@ -359,6 +361,95 @@ final class YouTubeService: NSObject {
         var list = snapshots.filter { $0.day != day }
         list.append(Snapshot(day: day, followers: channel?.subscribers ?? 0, views: channel?.views ?? 0, likes: r.likes))
         UserDefaults.standard.set(try? JSONEncoder().encode(Array(list.suffix(120))), forKey: "yt.snapshots.\(ch.id)")
+    }
+
+    // MARK: Directos (chat en vivo)
+
+    struct LiveInfo: Equatable {
+        let videoID: String
+        let chatID: String
+        let title: String
+        let channel: String
+        var viewers: Int
+        let started: Date
+    }
+
+    /// Busca el directo activo de un canal o de un link de YouTube.
+    func findLive(_ query: String) async throws -> LiveInfo {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { throw YTError(message: "Escribe el canal o pega el link del directo.") }
+
+        // 1) ¿Es un link con id de video?
+        if let id = Self.videoID(from: q) { return try await liveInfo(videoID: id) }
+
+        // 2) Canal por @handle o por nombre
+        let handle = q.hasPrefix("@") ? q : "@" + q
+        var channelID: String?
+        if let r = try? await api("GET", "channels?part=id&forHandle=\(handle.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "@"))) ?? handle)"),
+           let id = (r["items"] as? [[String: Any]])?.first?["id"] as? String { channelID = id }
+        if channelID == nil, q.hasPrefix("UC"), q.count > 20 { channelID = q }
+        guard let channelID else { throw YTError(message: "No encontré el canal «\(q)» en YouTube.") }
+
+        // 3) Directo activo de ese canal (search cuesta cuota, por eso se hace una sola vez)
+        let s = try await api("GET", "search?part=snippet&type=video&eventType=live&maxResults=1&channelId=\(channelID)")
+        guard let vid = ((s["items"] as? [[String: Any]])?.first?["id"] as? [String: Any])?["videoId"] as? String else {
+            throw YTError(message: "Ese canal no está en vivo ahora mismo.")
+        }
+        return try await liveInfo(videoID: vid)
+    }
+
+    private func liveInfo(videoID: String) async throws -> LiveInfo {
+        let r = try await api("GET", "videos?part=snippet,liveStreamingDetails&id=\(videoID)")
+        guard let item = (r["items"] as? [[String: Any]])?.first else { throw YTError(message: "No encontré ese video en YouTube.") }
+        let sn = item["snippet"] as? [String: Any] ?? [:]
+        let live = item["liveStreamingDetails"] as? [String: Any] ?? [:]
+        guard let chat = live["activeLiveChatId"] as? String else {
+            throw YTError(message: (live["actualEndTime"] != nil) ? "Ese directo ya terminó." : "Ese video no es un directo con chat activo.")
+        }
+        let iso = ISO8601DateFormatter()
+        return LiveInfo(videoID: videoID, chatID: chat,
+                        title: sn["title"] as? String ?? "Directo",
+                        channel: sn["channelTitle"] as? String ?? "",
+                        viewers: Int(live["concurrentViewers"] as? String ?? "") ?? 0,
+                        started: iso.date(from: live["actualStartTime"] as? String ?? "") ?? .now)
+    }
+
+    /// Espectadores de un directo (1 unidad de cuota).
+    func liveViewers(videoID: String) async throws -> Int {
+        let r = try await api("GET", "videos?part=liveStreamingDetails&id=\(videoID)")
+        let live = (r["items"] as? [[String: Any]])?.first?["liveStreamingDetails"] as? [String: Any] ?? [:]
+        return Int(live["concurrentViewers"] as? String ?? "") ?? 0
+    }
+
+    struct ChatPage { let texts: [String]; let next: String?; let waitMs: Int; let ended: Bool }
+
+    /// Lee los mensajes nuevos del chat desde el token anterior (5 unidades de cuota).
+    func liveChat(chatID: String, after token: String?) async throws -> ChatPage {
+        var path = "liveChat/messages?liveChatId=\(chatID)&part=snippet&maxResults=2000"
+        if let token { path += "&pageToken=\(token)" }
+        do {
+            let r = try await api("GET", path)
+            let texts = (r["items"] as? [[String: Any]] ?? []).compactMap {
+                (($0["snippet"] as? [String: Any])?["displayMessage"] as? String)?.lowercased()
+            }
+            return ChatPage(texts: texts, next: r["nextPageToken"] as? String,
+                            waitMs: r["pollingIntervalMillis"] as? Int ?? 5000, ended: false)
+        } catch let e as YTError {
+            if e.message.contains("liveChatEnded") || e.message.contains("ha terminado") {
+                return ChatPage(texts: [], next: nil, waitMs: 0, ended: true)
+            }
+            throw e
+        }
+    }
+
+    /// Saca el id del video de un link de YouTube (watch?v=, youtu.be, live/, shorts/).
+    static func videoID(from link: String) -> String? {
+        guard let u = URLComponents(string: link), let host = u.host?.lowercased(), host.contains("youtu") else { return nil }
+        if let v = u.queryItems?.first(where: { $0.name == "v" })?.value { return v }
+        let parts = u.path.split(separator: "/").map(String.init)
+        if host.contains("youtu.be") { return parts.first }
+        if let i = parts.firstIndex(where: { ["live", "shorts", "embed", "v"].contains($0) }), i + 1 < parts.count { return parts[i + 1] }
+        return nil
     }
 
     // MARK: Comentarios

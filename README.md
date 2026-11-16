@@ -47,6 +47,10 @@ En Ajustes → **IA (NVIDIA NIM)** pegas tu clave de build.nvidia.com; se guarda
 Más IA: portada elegida con visión, gancho en pantalla (3 s), subtítulos corregidos, «✨ Escribir con IA» (título, texto por red y hashtags) en el editor, consejo de horarios, ideas de contenido, clasificación de comentarios (preguntas, críticas y colaboraciones van a «Para ti» y no se responden solas), resumen de comentarios y estilo aprendido de tus respuestas a mano.
 Modelos automáticos por tarea: clipping rápido con `deepseek-ai/deepseek-v4.1-flash`, comentarios orgánicos con `writer/palmyra-creative-122b` y hashtags con `z-ai/glm-5.3-flash`, cada uno con respaldos (se puede fijar otro en Ajustes). Alternativa con servidor: carpeta `server/`.
 
+### YouTube en vivo (momentos de directos)
+
+Clipper → **YouTube en vivo**. Lee el chat de un directo con la API oficial (`liveChat/messages`) y marca los momentos en que explota o hay muchas reacciones. YouTube **no tiene API para crear clips**, así que la app guarda el momento con su tiempo exacto y un link directo a ese punto: tú tocas «Clip» en YouTube, o usas esos tiempos para cortar el VOD en el Clipper. Cuota: ~5 unidades cada 20 s (de 10.000 al día).
+
 ### Twitch (clips de directos)
 
 Clipper → **Clips de Twitch**. Vigila el chat de un directo y crea clips en Twitch cuando el chat explota o hay muchas reacciones (API oficial, máx. 1 por minuto). Los clips de **tu canal** se bajan y pasan a 9:16 con seguimiento de cara y subtítulos directo a la cola (Twitch no permite bajar clips de otros canales). Kick no tiene API pública de clips.
