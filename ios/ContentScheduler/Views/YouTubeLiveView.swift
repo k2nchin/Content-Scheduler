@@ -239,7 +239,17 @@ struct YouTubeLiveView: View {
                         }
                     }
                 }
-                Text("Cuando tengas el VOD del directo, estos tiempos te dicen exactamente dónde cortar en el Clipper.")
+                Button {
+                    let group = Dictionary(grouping: watcher.moments, by: { $0.videoID })
+                    guard let (vid, list) = group.max(by: { $0.value.count < $1.value.count }) else { return }
+                    PendingMarks.pack = PendingMarks.Pack(channel: list.first?.channel ?? "",
+                                                          videoID: vid,
+                                                          offsets: list.map(\.offset).sorted())
+                    store.show("\(list.count) momentos listos. Elige el video del directo en el Clipper.")
+                    dismiss()
+                } label: { Label("Cortar el video con estos momentos", systemImage: "scissors").frame(maxWidth: .infinity) }
+                    .buttonStyle(BoxButtonStyle(filled: true))
+                Text("Cuando tengas el archivo del directo, estos tiempos marcan exactamente dónde cortar.")
                     .font(.caption2).foregroundStyle(Theme.muted)
             }
         }
@@ -258,4 +268,20 @@ struct YouTubeLiveView: View {
         let t = Int(max(0, s))
         return t >= 3600 ? String(format: "%d:%02d:%02d", t / 3600, t % 3600 / 60, t % 60) : String(format: "%d:%02d", t / 60, t % 60)
     }
+}
+
+
+/// Momentos marcados en un directo que esperan el archivo del video para cortarlo.
+enum PendingMarks {
+    struct Pack: Codable {
+        var channel: String
+        var videoID: String
+        /// Segundos desde que empezó el directo.
+        var offsets: [Double]
+    }
+    static var pack: Pack? {
+        get { (UserDefaults.standard.data(forKey: "clipper.pending")).flatMap { try? JSONDecoder().decode(Pack.self, from: $0) } }
+        set { UserDefaults.standard.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: "clipper.pending") }
+    }
+    static func clear() { UserDefaults.standard.removeObject(forKey: "clipper.pending") }
 }

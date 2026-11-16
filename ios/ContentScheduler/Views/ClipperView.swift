@@ -122,6 +122,20 @@ struct ClipperView: View {
     }
 
     @ViewBuilder private var sourceStep: some View {
+        if let pack = PendingMarks.pack, !pack.offsets.isEmpty {
+            Box {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "bookmark.fill").foregroundStyle(Theme.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(pack.offsets.count) momentos de \(pack.channel)").bold()
+                        Text("Elige el archivo del directo y se cortan solos en esos puntos.").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                    Spacer(minLength: 0)
+                }
+                Button("Descartar los momentos") { PendingMarks.clear() }
+                    .font(.caption.bold()).foregroundStyle(Theme.red)
+            }
+        }
         PhotosPicker(selection: $pick, matching: .videos) {
             sourceCard("photo.on.rectangle", Theme.accent, "Video de tu galería", "Un en vivo, un ensayo, un podcast o un concierto.")
         }.buttonStyle(.plain)
@@ -517,6 +531,29 @@ struct ClipperView: View {
         clips = []
         levels = []
         transcript = []
+        applyPendingMarks()
+    }
+
+    /// Convierte los momentos marcados en el directo en clips, ajustados a la duración del archivo.
+    private func applyPendingMarks() {
+        guard let pack = PendingMarks.pack, !pack.offsets.isEmpty else { return }
+        let marks = pack.offsets.filter { $0 < duration + 60 }
+        guard !marks.isEmpty else {
+            store.show("Los momentos no caben en este video: ¿es el directo completo?")
+            return
+        }
+        var out: [Clip] = []
+        for m in marks {
+            let end = min(duration, m + 5)
+            let start = max(0, end - length)
+            guard end - start >= 3, !out.contains(where: { start < $0.end && end > $0.start }) else { continue }
+            out.append(Clip(start: start, end: end))
+        }
+        guard !out.isEmpty else { return }
+        clips = out
+        mode = .manual
+        PendingMarks.clear()
+        store.show("\(out.count) clips marcados desde el directo de \(pack.channel)")
     }
 
     private func findAI() async {
