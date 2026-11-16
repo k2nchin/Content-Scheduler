@@ -214,32 +214,34 @@ enum ClipEngine {
         let obj = try await json(try request("/tasks/\(taskID)"))
         let raw = (obj["progress"] as? Double) ?? Double((obj["progress"] as? Int) ?? 0)
         let list = (obj["clips"] as? [[String: Any]]) ?? []
-        var clips: [Clip] = []
-        for c in list {
-            guard let id = c["id"] as? String else { continue }
-            let start = number(c["start_time"])
-            let end = number(c["end_time"])
-            clips.append(Clip(
-                id: id,
-                filename: (c["filename"] as? String) ?? "clip.mp4",
-                hookTitle: (c["hook_title"] as? String) ?? "",
-                text: (c["text"] as? String) ?? "",
-                start: start,
-                end: end,
-                duration: number(c["duration"]) > 0 ? number(c["duration"]) : max(0, end - start),
-                virality: Int(number(c["virality_score"]).rounded()),
-                hook: Int(number(c["hook_score"]).rounded()),
-                engagement: Int(number(c["engagement_score"]).rounded()),
-                value: Int(number(c["value_score"]).rounded()),
-                shareable: Int(number(c["shareability_score"]).rounded()),
-                partNumber: Int(number(c["part_number"]).rounded())
-            ))
-        }
+        let clips = list.compactMap(parseClip)
         return Status(
             state: (obj["status"] as? String) ?? "processing",
             progress: min(1, max(0, raw > 1 ? raw / 100 : raw)),
             message: (obj["progress_message"] as? String) ?? "",
             clips: clips.sorted { $0.virality > $1.virality }
+        )
+    }
+
+    private static func parseClip(_ c: [String: Any]) -> Clip? {
+        guard let id = c["id"] as? String else { return nil }
+        let start = number(c["start_time"])
+        let end = number(c["end_time"])
+        let dur = number(c["duration"])
+        return Clip(
+            id: id,
+            filename: (c["filename"] as? String) ?? "clip.mp4",
+            hookTitle: (c["hook_title"] as? String) ?? "",
+            text: (c["text"] as? String) ?? "",
+            start: start,
+            end: end,
+            duration: dur > 0 ? dur : max(0, end - start),
+            virality: Int(number(c["virality_score"]).rounded()),
+            hook: Int(number(c["hook_score"]).rounded()),
+            engagement: Int(number(c["engagement_score"]).rounded()),
+            value: Int(number(c["value_score"]).rounded()),
+            shareable: Int(number(c["shareability_score"]).rounded()),
+            partNumber: Int(number(c["part_number"]).rounded())
         )
     }
 
@@ -323,6 +325,65 @@ enum ClipEngine {
                                    detail: (c["description"] as? String) ?? "",
                                    animation: (c["animation"] as? String) ?? "none")
         }
+    }
+
+    // MARK: Estudio — retocar los clips en el iMac
+
+    /// Recorta por los extremos y vuelve a renderizar. Los dos valores son segundos a quitar.
+    @discardableResult
+    static func trim(task: String, clip: String, start: Double, end: Double) async throws -> Clip? {
+        let obj = try await json(try request("/tasks/\(task)/clips/\(clip)",
+                                             method: "PATCH",
+                                             body: ["start_offset": max(0, start), "end_offset": max(0, end)]))
+        return (obj["clip"] as? [String: Any]).flatMap(parseClip)
+    }
+
+    /// Parte el clip en dos por ese segundo, contando desde su principio.
+    static func split(task: String, clip: String, at seconds: Double) async throws {
+        guard seconds > 0 else { throw YTError(message: "Elige un punto después del principio.") }
+        _ = try await json(try request("/tasks/\(task)/clips/\(clip)/split",
+                                       method: "POST", body: ["split_time": seconds]))
+    }
+
+    /// Junta varios clips en uno solo, en el orden que se le pasen.
+    static func merge(task: String, clips: [String]) async throws {
+        guard clips.count >= 2 else { throw YTError(message: "Elige al menos dos clips para juntarlos.") }
+        _ = try await json(try request("/tasks/\(task)/clips/merge",
+                                       method: "POST", body: ["clip_ids": clips]))
+    }
+
+    /// Reescribe los subtítulos a mano, con su tamaño, posición y palabras resaltadas.
+    static func captions(task: String, clip: String, text: String,
+                         position: String = "bottom", size: Int? = nil,
+                         highlight: [String] = []) async throws {
+        var body: [String: Any] = ["caption_text": text, "position": position, "highlight_words": highlight]
+        if let size { body["font_size"] = min(72, max(12, size)) }
+        _ = try await json(try request("/tasks/\(task)/clips/\(clip)/captions", method: "PATCH", body: body))
+    }
+
+    /// Baja el clip con los ajustes de una red: `tiktok`, `reels` o `shorts`.
+    static func export(task: String, clip: Clip, preset: String) async throws -> URL {
+        let r = try request("/tasks/\(task)/clips/\(clip.id)/export?preset=\(preset)")
+        let (tmp, resp) = try await URLSession.shared.download(for: r)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(code) else {
+            try? FileManager.default.removeItem(at: tmp)
+            throw error(code, [:])
+        }
+        let dest = AppStore.videosDir.appendingPathComponent(UUID().uuidString + ".mp4")
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.moveItem(at: tmp, to: dest)
+        return dest
+    }
+
+    /// Borra un clip del trabajo.
+    static func delete(task: String, clip: String) async throws {
+        _ = try await json(try request("/tasks/\(task)/clips/\(clip)", method: "DELETE"))
+    }
+
+    /// La dirección para ver el clip sin bajarlo, ya con la clave puesta.
+    static func streamRequest(task: String, clip: String) -> URLRequest? {
+        try? request("/tasks/\(task)/clips/\(clip)/file")
     }
 
     /// Comprueba que el iMac contesta y que la clave sirve.

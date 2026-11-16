@@ -32,6 +32,8 @@ struct EngineClipView: View {
     @State private var workflows: [ClipEngine.Workflow] = []
     @State private var templates: [ClipEngine.CaptionTemplate] = []
     @State private var detail: ClipEngine.Clip?
+    @State private var editing: ClipEngine.Clip?
+    @State private var merging = false
 
     var body: some View {
         NavigationStack {
@@ -63,6 +65,9 @@ struct EngineClipView: View {
             templates = (try? await ClipEngine.captionTemplates()) ?? []
         }
         .sheet(item: $detail) { c in scoreSheet(c) }
+        .sheet(item: $editing) { c in
+            EngineStudioView(taskID: taskID, clip: c, onChange: { Task { await refresh() } })
+        }
         .onDisappear { job?.cancel() }
     }
 
@@ -264,6 +269,11 @@ struct EngineClipView: View {
                             Text(clip.text).font(.caption).foregroundStyle(Theme.muted)
                                 .lineLimit(2).multilineTextAlignment(.leading)
                         }
+                        Text("Retocar")
+                            .font(.caption.bold()).foregroundStyle(Theme.accent)
+                            .padding(.top, 2)
+                            .contentShape(Rectangle())
+                            .onTapGesture { editing = clip }
                     }
                     Spacer(minLength: 0)
                     if clip.virality > 0 {
@@ -282,6 +292,17 @@ struct EngineClipView: View {
         }
     }
 
+    /// Vuelve a preguntarle al iMac por los clips de este trabajo.
+    private func refresh() async {
+        guard !taskID.isEmpty else { return }
+        if let s = try? await ClipEngine.status(taskID) {
+            await MainActor.run {
+                clips = s.clips
+                chosen = chosen.filter { id in s.clips.contains { $0.id == id } }
+            }
+        }
+    }
+
     private func scoreColor(_ v: Int) -> Color {
         v >= 75 ? Theme.ok : (v >= 50 ? Theme.warn : Theme.muted)
     }
@@ -297,6 +318,16 @@ struct EngineClipView: View {
             }
             .buttonStyle(BoxButtonStyle(filled: true))
             .disabled(chosen.isEmpty)
+            if chosen.count >= 2 {
+                Button { merge() } label: {
+                    Label("Juntar los \(chosen.count) en un solo clip", systemImage: "arrow.triangle.merge")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BoxButtonStyle(filled: false))
+                .disabled(merging)
+                Text("Se pegan en el orden en que salen en la lista.")
+                    .font(.caption2).foregroundStyle(Theme.muted)
+            }
         }
     }
 
@@ -343,6 +374,23 @@ struct EngineClipView: View {
                     store.show(error.localizedDescription)
                 }
             }
+        }
+    }
+
+    private func merge() {
+        // El orden lo manda la lista, no el orden en que los fuiste tocando.
+        let ids = clips.filter { chosen.contains($0.id) }.map(\.id)
+        let tid = taskID
+        merging = true
+        Task {
+            do {
+                try await ClipEngine.merge(task: tid, clips: ids)
+                await refresh()
+                await MainActor.run { chosen = []; store.show("Clips juntados") }
+            } catch {
+                await MainActor.run { store.show(error.localizedDescription) }
+            }
+            await MainActor.run { merging = false }
         }
     }
 
