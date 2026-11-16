@@ -163,20 +163,44 @@ enum ClipEngine {
         let (data, resp) = try await URLSession.shared.data(for: r)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        guard (200..<300).contains(code) else { throw error(code, obj) }
+        guard (200..<300).contains(code) else {
+            // Si no vino JSON, al menos se enseña lo que haya respondido.
+            if obj.isEmpty, let crudo = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !crudo.isEmpty, crudo.count < 300 {
+                throw YTError(message: "Tu motor dijo: \(crudo)")
+            }
+            throw error(code, obj)
+        }
         return obj
     }
 
     /// Traduce los errores del motor a algo que se entienda.
     private static func error(_ code: Int, _ obj: [String: Any]) -> YTError {
-        if let d = obj["detail"] as? String { return YTError(message: d) }
-        if let d = obj["detail"] as? [String: Any], let m = d["message"] as? String { return YTError(message: m) }
+        if let m = motivo(obj["detail"]) ?? motivo(obj["message"]) ?? motivo(obj["error"]) {
+            return YTError(message: m)
+        }
         switch code {
         case 401, 403: return YTError(message: "Tu motor de clipping rechazó la clave. Genera otra en la web y pégala en Ajustes.")
         case 404: return YTError(message: "El motor de clipping no encontró eso. ¿Está encendido el iMac?")
         case 0: return YTError(message: "No se pudo hablar con tu motor de clipping. Comprueba que el iMac esté encendido y en la misma red.")
         default: return YTError(message: "Tu motor de clipping respondió con error \(code).")
         }
+    }
+
+    /// Saca el texto de un «detail», venga como venga: texto, objeto o lista.
+    private static func motivo(_ v: Any?) -> String? {
+        if let s = v as? String, !s.isEmpty { return s }
+        if let d = v as? [String: Any] {
+            for k in ["message", "detail", "msg", "error", "reason"] {
+                if let m = motivo(d[k]) { return m }
+            }
+        }
+        // Los errores de validación llegan como una lista de objetos.
+        if let lista = v as? [Any] {
+            let textos = lista.compactMap { motivo($0) }
+            if !textos.isEmpty { return textos.joined(separator: ". ") }
+        }
+        return nil
     }
 
     /// Manda el link y devuelve el identificador del trabajo.
