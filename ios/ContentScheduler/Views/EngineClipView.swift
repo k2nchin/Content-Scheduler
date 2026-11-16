@@ -200,10 +200,10 @@ struct EngineClipView: View {
                 Text("Máxima").tag("quality")
             }.pickerStyle(.segmented)
             Picker("Duración", selection: $length) {
-                Text("Automática").tag("auto")
-                Text("30 s").tag("30")
-                Text("60 s").tag("60")
-                Text("90 s").tag("90")
+                Text("Auto").tag("auto")
+                Text("15-30 s").tag("short")
+                Text("30-60 s").tag("medium")
+                Text("1-2 min").tag("long")
             }.pickerStyle(.segmented)
             Toggle("Subtítulos quemados", isOn: $subtitles).tint(Theme.accent)
             if subtitles && !templates.isEmpty {

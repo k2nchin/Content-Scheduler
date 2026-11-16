@@ -120,8 +120,10 @@ enum ClipEngine {
         var format = "vertical"
         /// `fast`, `balanced` o `quality`.
         var mode = "balanced"
-        /// `auto`, o segundos como "30", "60"…
-        var length = "auto"
+        /// `auto`, `short` (15-30 s), `medium` (30-60 s) o `long` (1-2 min).
+        var length = "auto" {
+            didSet { if !["auto", "short", "medium", "long"].contains(length) { length = "auto" } }
+        }
         var captionTemplate = "default"
         var broll = false
         /// Vacío = los mejores momentos. Si pones texto, la IA corta siguiendo esa instrucción.
