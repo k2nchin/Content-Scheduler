@@ -78,6 +78,21 @@ struct ClipperView: View {
                 if !inTab { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { discardAll(); cleanup(); dismiss() }.disabled(working) } }
             }
             .onChange(of: pick) { _, item in Task { await load(item); if source != nil { step = .ajustes } } }
+            .onChange(of: store.incomingVideo) { _, v in
+                guard let v else { return }
+                store.incomingVideo = nil
+                Task {
+                    await open(v)
+                    if source != nil { step = .ajustes; store.show("Video recibido ✓") }
+                }
+            }
+            .task {
+                if let v = store.incomingVideo {
+                    store.incomingVideo = nil
+                    await open(v)
+                    if source != nil { step = .ajustes }
+                }
+            }
             .fullScreenCover(isPresented: $live) { LiveClipperView() }
             .sheet(isPresented: $twitchOpen) { TwitchView() }
             .sheet(isPresented: $ytLiveOpen) { YouTubeLiveView() }

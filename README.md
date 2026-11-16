@@ -39,6 +39,10 @@ Cada cambio en `ios/` compila la app en GitHub Actions (`.github/workflows/ios.y
 
 Hasta que Google verifique la app y pase la auditoría de la API de YouTube, los videos subidos quedan **privados**; la app lo marca como «YouTube lo dejó privado». La cuota gratuita alcanza para unas 6 subidas al día.
 
+### Abrir videos desde otras apps
+
+La app se registra para abrir videos: desde Fotos, Archivos, Drive o cualquier app, **Compartir → Content Scheduler** copia el video a la app y abre el Clipper con él.
+
 ### Traer videos por link (servidor propio)
 
 Ajustes → **Servidor de videos**: la dirección de un servidor tuyo. Con eso aparece «Traer por link» en el Clipper. La app **no descarga de ninguna plataforma**: solo hace `POST {servidor}/fetch` con `{"url": "…"}` y espera el archivo de video (o `{"video_url": "…"}` para bajarlo). Lo que ese servidor haga es responsabilidad de quien lo opera.

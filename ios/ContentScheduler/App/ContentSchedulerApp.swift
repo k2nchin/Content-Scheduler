@@ -10,6 +10,23 @@ struct ContentSchedulerApp: App {
 
     static let refreshID = "com.contentscheduler.app.refresh"
 
+    /// Copia a la app el video que llega desde otra app y lo manda al Clipper.
+    @MainActor
+    private func receive(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let ext = url.pathExtension.isEmpty ? "mov" : url.pathExtension
+        let dest = AppStore.videosDir.appendingPathComponent(UUID().uuidString + "." + ext)
+        do {
+            try FileManager.default.copyItem(at: url, to: dest)
+            // Si vino a la bandeja de entrada, se limpia para no dejar copias
+            if url.path.contains("/Inbox/") { try? FileManager.default.removeItem(at: url) }
+            store.incomingVideo = dest
+        } catch {
+            store.show("No se pudo abrir ese video: \(error.localizedDescription)")
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -23,6 +40,7 @@ struct ContentSchedulerApp: App {
                     _ = await Notifier.requestPermission()
                     await Self.sync(store: store, yt: youtube, meta: meta)
                 }
+                .onOpenURL { url in receive(url) }
                 .onChange(of: phase) { _, new in
                     if new == .active { Task { await Self.sync(store: store, yt: youtube, meta: meta) } }
                     if new == .background { Self.scheduleRefresh() }
@@ -132,6 +150,7 @@ struct RootView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) { BottomBar(tab: $tab) }
+        .onChange(of: store.incomingVideo) { _, v in if v != nil { tab = .clipper } }
         .overlay(alignment: .bottom) {
             if let t = store.toast {
                 Text(t)

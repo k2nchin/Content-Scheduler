@@ -34,6 +34,11 @@ targets:
     info:
       path: ContentScheduler/Info.plist
       properties:
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Video
+            LSHandlerRank: Alternate
+            CFBundleTypeRole: Editor
+            LSItemContentTypes: [public.movie, public.mpeg-4, com.apple.quicktime-movie, public.video]
         CFBundleURLTypes:
           - CFBundleURLSchemes: ["$(GOOGLE_REVERSED_CLIENT_ID)"]
         GoogleClientID: "$(GOOGLE_IOS_CLIENT_ID)"

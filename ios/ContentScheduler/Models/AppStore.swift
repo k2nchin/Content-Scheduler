@@ -6,6 +6,8 @@ import AVFoundation
 final class AppStore {
     var state = AppState() { didSet { persist() } }
     var toast: String?
+    /// Video que llegó desde otra app con «Compartir → Content Scheduler».
+    var incomingVideo: URL?
     /// Redes conectadas de verdad (las elige por defecto cada video nuevo).
     var connected: Set<Network> = []
 
