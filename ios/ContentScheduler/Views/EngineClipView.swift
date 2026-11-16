@@ -232,7 +232,9 @@ struct EngineClipView: View {
     @ViewBuilder private var resultsHeader: some View {
         Box {
             Text(clips.count == 1 ? "Tu iMac devolvió 1 clip" : "Tu iMac devolvió \(clips.count) clips").bold()
-            Text("Elige los que quieras y se bajan a la cola, listos para publicar.")
+            Text(DriveService.shared.isConnected && DriveService.shared.useDrive
+                 ? "Al mandarlos a la cola se guardan en tu Google Drive, no en el iPhone."
+                 : "Elige los que quieras y se bajan a la cola, listos para publicar.")
                 .font(.caption).foregroundStyle(Theme.muted)
             HStack(spacing: 14) {
                 Button(chosen.count == clips.count ? "Ninguno" : "Todos") {
@@ -394,6 +396,18 @@ struct EngineClipView: View {
         }
     }
 
+    /// Si tienes Google Drive puesto, el clip se sube ahí y se borra del teléfono.
+    private func guardarEnDrive(_ id: UUID, file: URL, titulo: String) async {
+        let drive = DriveService.shared
+        guard drive.isConnected, drive.useDrive else { return }
+        let nombre = (titulo.isEmpty ? "clip" : String(titulo.prefix(40))) + ".mp4"
+        guard let did = try? await drive.upload(file, name: nombre) else { return }
+        await MainActor.run {
+            store.update(id) { $0.driveID = did }
+            store.deleteVideoFile(of: id)
+        }
+    }
+
     private func save() {
         saving = true
         let picked = clips.filter { chosen.contains($0.id) }
@@ -410,6 +424,7 @@ struct EngineClipView: View {
                             if !clip.hookTitle.isEmpty { post.title = String(clip.hookTitle.prefix(100)) }
                         }
                     }
+                    await guardarEnDrive(id, file: file, titulo: clip.hookTitle)
                     done += 1
                 } catch {
                     await MainActor.run { store.show(error.localizedDescription) }

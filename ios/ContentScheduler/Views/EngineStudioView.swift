@@ -265,6 +265,17 @@ struct EngineStudioView: View {
             let id = await store.addVideo(from: file, youtubeConnected: connected)
             await MainActor.run {
                 if !titulo.isEmpty { store.update(id) { $0.title = String(titulo.prefix(100)) } }
+            }
+            // Con Google Drive puesto, el clip se sube ahí y no ocupa el teléfono.
+            let drive = DriveService.shared
+            if drive.isConnected, drive.useDrive,
+               let did = try? await drive.upload(file, name: (titulo.isEmpty ? "clip" : String(titulo.prefix(40))) + ".mp4") {
+                await MainActor.run {
+                    store.update(id) { $0.driveID = did }
+                    store.deleteVideoFile(of: id)
+                }
+            }
+            await MainActor.run {
                 store.show("Clip en la cola")
                 dismiss()
             }
