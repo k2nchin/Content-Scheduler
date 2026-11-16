@@ -181,6 +181,7 @@ struct ClipperView: View {
         Button { ytLiveOpen = true } label: {
             sourceCard("play.rectangle.fill", Color(hex: 0xFF0000), "YouTube en vivo", "Marca los momentos en que el chat explota.")
         }.buttonStyle(.plain)
+        shareHint
         if loading { ProgressView("Preparando video…").frame(maxWidth: .infinity) }
         if VideoFetcher.isConfigured {
             Box {
@@ -190,7 +191,6 @@ struct ClipperView: View {
                     .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     .disabled(fetching)
                 if fetching {
-                    if progress >= 0 { ProgressView(value: progress).tint(Theme.accent) }
                     HStack { ProgressView(); Text(status).font(.caption).foregroundStyle(Theme.muted) }
                 } else {
                     Button { Task { await fetchByLink() } } label: {
@@ -213,6 +213,21 @@ struct ClipperView: View {
                 .buttonStyle(BoxButtonStyle())
             Text("Solo videos de tu canal: en YouTube Studio toca ⋮ → Descargar y luego elígelo en «Archivos o Google Drive».")
                 .font(.caption).foregroundStyle(Theme.muted)
+        }
+    }
+
+    /// Aviso de que se puede compartir un video desde cualquier app.
+    private var shareHint: some View {
+        Box {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "square.and.arrow.up").foregroundStyle(Theme.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Desde cualquier app").bold()
+                    Text("En Fotos, Archivos, Drive o donde tengas el video: «Compartir → Content Scheduler» y cae aquí solo.")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                }
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -569,10 +584,7 @@ struct ClipperView: View {
         fetching = true
         defer { fetching = false; progress = 0 }
         do {
-            let file = try await VideoFetcher.fetch(fetchLink) { p, s in
-                progress = max(0, p)
-                status = s
-            }
+            let file = try await VideoFetcher.fetch(fetchLink) { _, s in status = s }
             fetchLink = ""
             await open(file)
             if source != nil { step = .ajustes }
