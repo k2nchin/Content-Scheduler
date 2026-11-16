@@ -22,6 +22,9 @@ struct SettingsView: View {
     @State private var exporting = false
     @State private var importing = false
     @State private var backupDoc = BackupDocument(data: Data())
+    @State private var engineKey = ""
+    @State private var engineSaved = Keychain.get("clip.engine.key") != nil
+    @State private var checkingEngine = false
 
     var body: some View {
         NavigationStack {
@@ -31,6 +34,7 @@ struct SettingsView: View {
 
                 accountsSection
                 watermarkSection
+                engineSection
                 serverSection
                 aiSection
                 driveSection
@@ -57,6 +61,26 @@ struct SettingsView: View {
             .confirmationDialog("¿Desconectar Facebook e Instagram?", isPresented: $confirmMeta, titleVisibility: .visible) {
                 Button("Desconectar", role: .destructive) { meta.disconnect(); store.show("Facebook e Instagram desconectados") }
             }
+        }
+    }
+
+    /// Guarda la clave si escribiste una y comprueba que el iMac contesta.
+    private func saveAndCheckEngine() {
+        let typed = engineKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty {
+            ClipEngine.apiKey = typed
+            engineSaved = true
+            engineKey = ""
+        }
+        checkingEngine = true
+        Task {
+            do {
+                try await ClipEngine.check()
+                store.show("Tu motor de clipping responde")
+            } catch {
+                store.show(error.localizedDescription)
+            }
+            checkingEngine = false
         }
     }
 
@@ -182,6 +206,38 @@ struct SettingsView: View {
     @ViewBuilder private var watermarkSection: some View {
             SectionLabel(text: "Marca de agua")
             Card { WatermarkSettings() }
+
+    }
+
+    @ViewBuilder private var engineSection: some View {
+            SectionLabel(text: "Motor de clipping")
+            Card {
+                Text("El Docker que tienes encendido en el iMac. Le mandas el link y te devuelve los clips ya cortados, con subtítulos y encuadre a la cara.")
+                    .font(.caption).foregroundStyle(Theme.muted)
+                TextField("http://192.168.1.50:8000", text: Binding(get: { ClipEngine.server }, set: { ClipEngine.server = $0 }))
+                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                SecureField(engineSaved ? "Pega una clave nueva para cambiarla" : "Clave de API (sk_…)", text: $engineKey)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                HStack(spacing: 10) {
+                    Button(engineKey.isEmpty ? "Probar conexión" : "Guardar y probar") { saveAndCheckEngine() }
+                        .buttonStyle(.borderedProminent).tint(Theme.accent)
+                        .disabled(checkingEngine)
+                    if engineSaved {
+                        Button("Borrar clave", role: .destructive) {
+                            ClipEngine.apiKey = ""; engineSaved = false; engineKey = ""
+                            store.show("Clave del motor borrada")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    if checkingEngine { ProgressView().controlSize(.small) }
+                }
+                Text("La clave se saca en la web del motor, en Ajustes → Claves de API. Se guarda en el llavero del iPhone, nunca en el código.")
+                    .font(.caption2).foregroundStyle(Theme.muted)
+                Text("Para usarlo fuera de casa, el iMac tiene que ser accesible desde internet; en la misma wifi basta con su dirección local.")
+                    .font(.caption2).foregroundStyle(Theme.muted)
+            }
 
     }
 

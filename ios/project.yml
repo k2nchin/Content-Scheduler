@@ -45,6 +45,10 @@ targets:
         MetaAppID: "$(META_APP_ID)"
         ClipAIURL: "$(CLIP_AI_URL)"
         ClipServerURL: "$(CLIP_SERVER_URL)"
+        ClipEngineURL: "$(CLIP_ENGINE_URL)"
+        NSLocalNetworkUsageDescription: "Para hablar con tu motor de clipping cuando corre en un ordenador de tu casa."
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
         NIMEmbeddedKey: "$(NIM_EMBEDDED_KEY)"
         TwitchClientID: "$(TWITCH_CLIENT_ID)"
         ITSAppUsesNonExemptEncryption: false

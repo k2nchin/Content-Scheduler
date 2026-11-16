@@ -22,6 +22,7 @@ struct ClipperView: View {
     @State private var live = false
     @State private var twitchOpen = false
     @State private var ytLiveOpen = false
+    @State private var engineOpen = false
     @State private var fetchLink = ""
     @State private var fetching = false
     @State private var ytLink = ""
@@ -96,6 +97,7 @@ struct ClipperView: View {
             .fullScreenCover(isPresented: $live) { LiveClipperView() }
             .sheet(isPresented: $twitchOpen) { TwitchView() }
             .sheet(isPresented: $ytLiveOpen) { YouTubeLiveView() }
+            .sheet(isPresented: $engineOpen) { EngineClipView() }
             .sheet(item: $preview) { m in
                 ResultPreview(made: m,
                               onQueue: { t, cut in Task { await queue(m, title: t, trim: cut) } },
@@ -181,6 +183,11 @@ struct ClipperView: View {
         Button { ytLiveOpen = true } label: {
             sourceCard("play.rectangle.fill", Color(hex: 0xFF0000), "YouTube en vivo", "Marca los momentos en que el chat explota.")
         }.buttonStyle(.plain)
+        if ClipEngine.isConfigured {
+            Button { engineOpen = true } label: {
+                sourceCard("desktopcomputer", Theme.ok, "Clipear por link en tu iMac", "Pega el link y tu iMac devuelve los clips ya cortados.")
+            }.buttonStyle(.plain)
+        }
         shareHint
         if loading { ProgressView("Preparando video…").frame(maxWidth: .infinity) }
         if VideoFetcher.isConfigured {

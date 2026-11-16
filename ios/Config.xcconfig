@@ -17,3 +17,6 @@ TWITCH_CLIENT_ID =
 
 // Servidor propio que trae videos por link (opcional; también se puede poner en Ajustes).
 CLIP_SERVER_URL = 
+
+// Motor de clipping (el Docker del iMac). Vacío: se pone en Ajustes de la app.
+CLIP_ENGINE_URL =

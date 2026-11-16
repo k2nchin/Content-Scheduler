@@ -1,0 +1,238 @@
+import Foundation
+
+/// Cliente del motor de clipping que corre en tu iMac (la carpeta `clipper-web`, con Docker).
+///
+/// El iPhone no procesa nada aquí: le manda el link al iMac, el iMac baja el video,
+/// lo transcribe, la IA escoge los momentos y devuelve los clips ya cortados en 9:16
+/// con subtítulos. La app se los baja y los mete en la cola de publicación.
+///
+/// La dirección y la clave se ponen en Ajustes → Motor de clipping.
+///   POST   {servidor}/tasks/                      → {"task_id": "…"}
+///   GET    {servidor}/tasks/{id}                  → estado, progreso y clips
+///   GET    {servidor}/tasks/{id}/clips/{cid}/file → el archivo del clip
+enum ClipEngine {
+
+    // MARK: Configuración
+
+    /// Dirección del motor, por ejemplo http://192.168.1.50:8000 (el iMac en tu red).
+    static var server: String {
+        get {
+            let saved = UserDefaults.standard.string(forKey: "clip.engine")?.trimmingCharacters(in: .whitespaces) ?? ""
+            if !saved.isEmpty { return saved }
+            return (Bundle.main.object(forInfoDictionaryKey: "ClipEngineURL") as? String ?? "").trimmingCharacters(in: .whitespaces)
+        }
+        set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespaces), forKey: "clip.engine") }
+    }
+
+    /// Clave de API del motor (`sk_…`), de Ajustes → Claves de API en la web. Se guarda en el llavero.
+    static var apiKey: String {
+        get { Keychain.get("clip.engine.key") ?? "" }
+        set { newValue.isEmpty ? Keychain.delete("clip.engine.key") : Keychain.set(newValue, for: "clip.engine.key") }
+    }
+
+    static var isConfigured: Bool {
+        guard let u = URL(string: server), let s = u.scheme, s == "http" || s == "https" else { return false }
+        return !apiKey.isEmpty
+    }
+
+    // MARK: Lo que devuelve el motor
+
+    struct Clip: Identifiable, Hashable {
+        let id: String
+        let filename: String
+        /// El título de gancho que escribió la IA, el que va quemado arriba los primeros segundos.
+        let hookTitle: String
+        /// Lo que se dice en el clip, para usarlo de descripción.
+        let text: String
+        let start: Double
+        let end: Double
+        let duration: Double
+        /// 0 a 100. Cuanto más alto, más posibilidades le ve la IA.
+        let virality: Int
+    }
+
+    struct Status {
+        /// `queued`, `processing`, `completed`, `error` o `cancelled`.
+        let state: String
+        /// De 0 a 1.
+        let progress: Double
+        let message: String
+        let clips: [Clip]
+        var isDone: Bool { state == "completed" }
+        var isFailed: Bool { state == "error" || state == "cancelled" }
+    }
+
+    /// Cómo quieres los clips. Los valores son los que entiende el motor.
+    struct Options {
+        var subtitles = true
+        /// `vertical` (9:16), `square` o `horizontal`.
+        var format = "vertical"
+        /// `fast`, `balanced` o `quality`.
+        var mode = "balanced"
+        /// `auto`, o segundos como "30", "60"…
+        var length = "auto"
+        var captionTemplate = "default"
+        var broll = false
+        /// Vacío = los mejores momentos. Si pones texto, la IA corta siguiendo esa instrucción.
+        var instructions = ""
+    }
+
+    // MARK: Llamadas
+
+    private static func url(_ path: String) throws -> URL {
+        let base = server.hasSuffix("/") ? String(server.dropLast()) : server
+        guard let u = URL(string: base + path) else {
+            throw YTError(message: "La dirección del motor de clipping no es válida. Revísala en Ajustes.")
+        }
+        return u
+    }
+
+    private static func request(_ path: String, method: String = "GET", body: [String: Any]? = nil) throws -> URLRequest {
+        guard isConfigured else {
+            throw YTError(message: "Pon la dirección y la clave de tu motor de clipping en Ajustes.")
+        }
+        var r = URLRequest(url: try url(path))
+        r.httpMethod = method
+        r.timeoutInterval = 120
+        r.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        if let body {
+            r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            r.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+        return r
+    }
+
+    private static func json(_ r: URLRequest) async throws -> [String: Any] {
+        let (data, resp) = try await URLSession.shared.data(for: r)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        guard (200..<300).contains(code) else { throw error(code, obj) }
+        return obj
+    }
+
+    /// Traduce los errores del motor a algo que se entienda.
+    private static func error(_ code: Int, _ obj: [String: Any]) -> YTError {
+        if let d = obj["detail"] as? String { return YTError(message: d) }
+        if let d = obj["detail"] as? [String: Any], let m = d["message"] as? String { return YTError(message: m) }
+        switch code {
+        case 401, 403: return YTError(message: "Tu motor de clipping rechazó la clave. Genera otra en la web y pégala en Ajustes.")
+        case 404: return YTError(message: "El motor de clipping no encontró eso. ¿Está encendido el iMac?")
+        case 0: return YTError(message: "No se pudo hablar con tu motor de clipping. Comprueba que el iMac esté encendido y en la misma red.")
+        default: return YTError(message: "Tu motor de clipping respondió con error \(code).")
+        }
+    }
+
+    /// Manda el link y devuelve el identificador del trabajo.
+    static func start(_ link: String, options: Options = Options()) async throws -> String {
+        let clean = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let u = URL(string: clean), let s = u.scheme, s == "http" || s == "https" else {
+            throw YTError(message: "Pega un link válido de YouTube, Twitch o Kick.")
+        }
+        var body: [String: Any] = [
+            "source": ["url": clean],
+            "add_subtitles": options.subtitles,
+            "output_format": options.format,
+            "processing_mode": options.mode,
+            "clip_length": options.length,
+            "caption_template": options.captionTemplate,
+            "include_broll": options.broll,
+        ]
+        if !options.instructions.isEmpty { body["instructions"] = options.instructions }
+        let obj = try await json(try request("/tasks/", method: "POST", body: body))
+        guard let id = obj["task_id"] as? String else {
+            throw YTError(message: "Tu motor de clipping no devolvió el trabajo.")
+        }
+        return id
+    }
+
+    /// Cómo va el trabajo y qué clips hay ya.
+    static func status(_ taskID: String) async throws -> Status {
+        let obj = try await json(try request("/tasks/\(taskID)"))
+        let raw = (obj["progress"] as? Double) ?? Double((obj["progress"] as? Int) ?? 0)
+        let list = (obj["clips"] as? [[String: Any]]) ?? []
+        var clips: [Clip] = []
+        for c in list {
+            guard let id = c["id"] as? String else { continue }
+            let start = number(c["start_time"])
+            let end = number(c["end_time"])
+            clips.append(Clip(
+                id: id,
+                filename: (c["filename"] as? String) ?? "clip.mp4",
+                hookTitle: (c["hook_title"] as? String) ?? "",
+                text: (c["text"] as? String) ?? "",
+                start: start,
+                end: end,
+                duration: number(c["duration"]) > 0 ? number(c["duration"]) : max(0, end - start),
+                virality: Int(number(c["virality_score"]).rounded())
+            ))
+        }
+        return Status(
+            state: (obj["status"] as? String) ?? "processing",
+            progress: min(1, max(0, raw > 1 ? raw / 100 : raw)),
+            message: (obj["progress_message"] as? String) ?? "",
+            clips: clips.sorted { $0.virality > $1.virality }
+        )
+    }
+
+    private static func number(_ v: Any?) -> Double {
+        if let d = v as? Double { return d }
+        if let i = v as? Int { return Double(i) }
+        if let s = v as? String { return Double(s) ?? 0 }
+        return 0
+    }
+
+    /// Espera a que termine, avisando del progreso. Devuelve los clips.
+    /// Pregunta cada 3 segundos; si el iMac tarda, sigue esperando mientras siga respondiendo.
+    static func wait(_ taskID: String, onProgress: @escaping @MainActor (Double, String) -> Void) async throws -> [Clip] {
+        var fallos = 0
+        while !Task.isCancelled {
+            do {
+                let s = try await status(taskID)
+                fallos = 0
+                await onProgress(s.progress, s.message.isEmpty ? "Tu iMac está trabajando…" : s.message)
+                if s.isDone { return s.clips }
+                if s.isFailed {
+                    throw YTError(message: s.message.isEmpty ? "El motor de clipping no pudo con ese video." : s.message)
+                }
+            } catch let e as YTError {
+                throw e
+            } catch {
+                // Un corte de red no tira el trabajo: el iMac sigue cortando.
+                fallos += 1
+                if fallos >= 20 {
+                    throw YTError(message: "Se perdió la conexión con tu iMac. El trabajo sigue allá; vuelve a entrar más tarde.")
+                }
+                await onProgress(-1, "Reconectando con tu iMac…")
+            }
+            try await Task.sleep(for: .seconds(3))
+        }
+        throw CancellationError()
+    }
+
+    /// Baja un clip ya cortado y lo guarda en la app.
+    static func download(task taskID: String, clip: Clip) async throws -> URL {
+        let r = try request("/tasks/\(taskID)/clips/\(clip.id)/file?download=true")
+        let (tmp, resp) = try await URLSession.shared.download(for: r)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(code) else {
+            try? FileManager.default.removeItem(at: tmp)
+            let obj = (try? Data(contentsOf: tmp)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any] ?? [:]
+            throw error(code, obj)
+        }
+        let size = (try? FileManager.default.attributesOfItem(atPath: tmp.path)[.size] as? Int) ?? 0
+        guard size > 50_000 else {
+            try? FileManager.default.removeItem(at: tmp)
+            throw YTError(message: "Ese clip llegó vacío desde tu iMac.")
+        }
+        let ext = (clip.filename as NSString).pathExtension.isEmpty ? "mp4" : (clip.filename as NSString).pathExtension
+        let dest = AppStore.videosDir.appendingPathComponent(UUID().uuidString + "." + ext)
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.moveItem(at: tmp, to: dest)
+        return dest
+    }
+
+    /// Comprueba que el iMac contesta y que la clave sirve.
+    static func check() async throws {
+        _ = try await json(try request("/tasks/"))
+    }
+}
