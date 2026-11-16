@@ -260,12 +260,15 @@ struct EngineClipView: View {
     private func clipRow(_ clip: ClipEngine.Clip) -> some View {
         Box {
                 HStack(alignment: .top, spacing: 12) {
-                    Image(systemName: chosen.contains(clip.id) ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(chosen.contains(clip.id) ? Theme.accent : Theme.muted)
-                        .font(.title3)
+                    EnginePreview(taskID: taskID, clip: clip)
+                        .frame(width: 104)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(clip.hookTitle.isEmpty ? "Clip \(Int(clip.start / 60)) min" : clip.hookTitle)
-                            .bold().multilineTextAlignment(.leading)
+                        HStack(alignment: .top, spacing: 7) {
+                            Image(systemName: chosen.contains(clip.id) ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(chosen.contains(clip.id) ? Theme.accent : Theme.muted)
+                            Text(clip.hookTitle.isEmpty ? "Clip \(Int(clip.start / 60)) min" : clip.hookTitle)
+                                .bold().multilineTextAlignment(.leading)
+                        }
                         HStack(spacing: 6) {
                             if clip.partNumber > 0 {
                                 Text("PARTE \(clip.partNumber)")
@@ -273,7 +276,7 @@ struct EngineClipView: View {
                                     .padding(.horizontal, 6).padding(.vertical, 2)
                                     .background(Theme.accent, in: Capsule())
                             }
-                            Text("\(Int(clip.duration)) s · desde el minuto \(Int(clip.start / 60))")
+                            Text(momento(clip))
                                 .font(.caption).foregroundStyle(Theme.muted)
                         }
                         if !clip.text.isEmpty {
@@ -410,6 +413,12 @@ struct EngineClipView: View {
         case "original": return "Se queda tal cual, sin recortar."
         default: return "Recorta solo a 9:16 buscando a quien habla."
         }
+    }
+
+    /// Cuánto dura y de qué parte del video salió.
+    private func momento(_ c: ClipEngine.Clip) -> String {
+        let m = Int(c.start / 60)
+        return "\(Int(c.duration)) s · " + (m > 0 ? "min \(m)" : "del principio")
     }
 
     private func scoreColor(_ v: Int) -> Color {
