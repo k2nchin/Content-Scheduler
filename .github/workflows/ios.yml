@@ -34,6 +34,13 @@ jobs:
           xcodebuild -project ContentScheduler.xcodeproj -target ContentScheduler \
             -sdk iphoneos -configuration Release SYMROOT="$PWD/build" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > build.log 2>&1 || true
+          {
+            echo "## Resultado"
+            echo '```'
+            grep -E "error:" build.log | sed 's#.*/ios/##' | sort -u | head -40
+            grep -E "BUILD (SUCCEEDED|FAILED)" build.log | tail -1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
           grep -E "error:|BUILD (SUCCEEDED|FAILED)" build.log || true
           # Si no compiló, que falle aquí (y no se publique una .ipa vacía)
           grep -q "BUILD SUCCEEDED" build.log

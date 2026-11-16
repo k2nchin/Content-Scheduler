@@ -87,7 +87,7 @@ enum VideoFetcher {
     /// Mueve el archivo temporal a la carpeta de videos de la app.
     private static func move(_ tmp: URL, ext: String) throws -> URL {
         let size = (try? FileManager.default.attributesOfItem(atPath: tmp.path)[.size] as? Int) ?? 0
-        guard (size ?? 0) > 100_000 else {
+        guard size > 100_000 else {
             try? FileManager.default.removeItem(at: tmp)
             throw YTError(message: "Tu servidor devolvió un archivo vacío o demasiado pequeño.")
         }
