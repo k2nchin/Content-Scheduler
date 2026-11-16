@@ -49,7 +49,7 @@ Modelos automáticos por tarea: clipping rápido con `deepseek-ai/deepseek-v4.1-
 
 ### YouTube en vivo (momentos de directos)
 
-Clipper → **YouTube en vivo**. Lee el chat de un directo con la API oficial (`liveChat/messages`) y marca los momentos en que explota o hay muchas reacciones. YouTube **no tiene API para crear clips**, así que la app guarda el momento con su tiempo exacto y un link directo a ese punto: tú tocas «Clip» en YouTube, o usas esos tiempos para cortar el VOD en el Clipper. Cuota: ~5 unidades cada 20 s (de 10.000 al día).
+Clipper → **YouTube en vivo**. Lee el chat de un directo con la API oficial (`liveChat/messages`) y marca los momentos en que explota o hay muchas reacciones. YouTube **no tiene API para crear clips**, así que la app guarda el momento con su tiempo exacto y un link directo a ese punto: tú tocas «Clip» en YouTube, o usas esos tiempos para cortar el VOD en el Clipper. Cuota: en «Tiempo real» lee el chat cada ~5 s (~2,5 h de directo al día); apagado, cada 20 s (~11 h).
 
 ### Twitch (clips de directos)
 

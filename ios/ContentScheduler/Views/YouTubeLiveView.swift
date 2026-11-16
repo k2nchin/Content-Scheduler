@@ -24,6 +24,13 @@ final class YouTubeLiveWatcher {
     var lastEvent = ""
     var moments: [Moment] = [] { didSet { save() } }
     var quotaCalls = 0
+    /// Tiempo real: sigue el ritmo que marca YouTube (~5 s). Apagado: cada 20 s, gasta menos cuota.
+    var fast: Bool {
+        get { UserDefaults.standard.object(forKey: "yt.live.fast") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "yt.live.fast") }
+    }
+    /// Unidades de cuota por hora con el ritmo actual.
+    var quotaPerHour: Int { fast ? 3600 : 900 }
 
     private var task: Task<Void, Never>?
     private var times: [Date] = []
@@ -81,12 +88,12 @@ final class YouTubeLiveWatcher {
                 evaluate()
                 // Cada ~2 min refresca los espectadores (1 unidad)
                 ticks += 1
-                if ticks % 6 == 0, let v = try? await yt.liveViewers(videoID: info.videoID) {
+                if ticks % (fast ? 24 : 6) == 0, let v = try? await yt.liveViewers(videoID: info.videoID) {
                     live?.viewers = v
                     quotaCalls += 1
                 }
-                // Se respeta el intervalo de YouTube, con un mínimo de 20 s para cuidar la cuota
-                let wait = max(20_000, page.waitMs)
+                // En tiempo real se sigue el ritmo de YouTube; si no, cada 20 s para cuidar la cuota
+                let wait = fast ? max(2_000, page.waitMs) : max(20_000, page.waitMs)
                 try await Task.sleep(for: .milliseconds(wait))
             } catch is CancellationError {
                 return
@@ -172,7 +179,7 @@ struct YouTubeLiveView: View {
                     Button { watcher.stop() } label: { Text("Parar").frame(maxWidth: .infinity) }
                         .buttonStyle(BoxButtonStyle())
                 }
-                Text("Deja esta pantalla abierta. Consumo: ~\(watcher.quotaCalls * 5) de 10.000 unidades de cuota hoy.")
+                Text("Deja esta pantalla abierta. Llevas ~\(watcher.quotaCalls * 5) de 10.000 unidades de cuota hoy.")
                     .font(.caption2).foregroundStyle(Theme.muted)
             } else {
                 Button {
@@ -183,6 +190,16 @@ struct YouTubeLiveView: View {
                     }
                 } label: { Label(busy ? "Buscando el directo…" : "Vigilar el chat", systemImage: "eye").frame(maxWidth: .infinity) }
                     .buttonStyle(BoxButtonStyle(filled: true, color: red)).disabled(busy)
+                Divider().overlay(Theme.line)
+                Toggle(isOn: Binding(get: { watcher.fast }, set: { watcher.fast = $0 })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Tiempo real").bold()
+                        Text(watcher.fast
+                             ? "Lee el chat al ritmo de YouTube (~5 s): te avisa al instante. Alcanza para ~2,5 h de directo al día."
+                             : "Lee el chat cada 20 s: avisa con un poco de retraso, pero alcanza para ~11 h al día.")
+                            .font(.caption).foregroundStyle(Theme.muted)
+                    }
+                }
                 Text("La app marca los momentos en que el chat explota. YouTube no deja crear clips por programa: tocas el momento y lo abres en YouTube para usar su botón «Clip».")
                     .font(.caption).foregroundStyle(Theme.muted)
             }
