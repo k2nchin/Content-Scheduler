@@ -22,6 +22,8 @@ struct ClipperView: View {
     @State private var live = false
     @State private var twitchOpen = false
     @State private var ytLiveOpen = false
+    @State private var fetchLink = ""
+    @State private var fetching = false
     @State private var ytLink = ""
     @Environment(\.openURL) private var openURL
     private var drive: DriveService { DriveService.shared }
@@ -165,6 +167,25 @@ struct ClipperView: View {
             sourceCard("play.rectangle.fill", Color(hex: 0xFF0000), "YouTube en vivo", "Marca los momentos en que el chat explota.")
         }.buttonStyle(.plain)
         if loading { ProgressView("Preparando video…").frame(maxWidth: .infinity) }
+        if VideoFetcher.isConfigured {
+            Box {
+                Text("TRAER POR LINK").font(Theme.mono).foregroundStyle(Theme.muted)
+                TextField("Pega el link del video", text: $fetchLink)
+                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .disabled(fetching)
+                if fetching {
+                    if progress >= 0 { ProgressView(value: progress).tint(Theme.accent) }
+                    HStack { ProgressView(); Text(status).font(.caption).foregroundStyle(Theme.muted) }
+                } else {
+                    Button { Task { await fetchByLink() } } label: {
+                        Label("Traer el video", systemImage: "arrow.down.circle").frame(maxWidth: .infinity)
+                    }.buttonStyle(BoxButtonStyle(filled: true)).disabled(fetchLink.isEmpty)
+                }
+                Text("Tu servidor baja el video y la app lo recibe listo para clipear.")
+                    .font(.caption).foregroundStyle(Theme.muted)
+            }
+        }
         Box {
             Text("TU VIDEO DE YOUTUBE").font(Theme.mono).foregroundStyle(Theme.muted)
             TextField("https://youtu.be/… o youtube.com/live/…", text: $ytLink)
@@ -525,6 +546,23 @@ struct ClipperView: View {
             await open(dest)
         } catch {
             store.show("No se pudo abrir ese archivo. Si está en Drive, márcalo «Disponible sin conexión» e intenta otra vez.")
+        }
+    }
+
+    /// Le pide el video a tu servidor y lo deja listo en el Clipper.
+    private func fetchByLink() async {
+        fetching = true
+        defer { fetching = false; progress = 0 }
+        do {
+            let file = try await VideoFetcher.fetch(fetchLink) { p, s in
+                progress = max(0, p)
+                status = s
+            }
+            fetchLink = ""
+            await open(file)
+            if source != nil { step = .ajustes }
+        } catch {
+            store.show(error.localizedDescription)
         }
     }
 

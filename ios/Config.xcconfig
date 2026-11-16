@@ -14,3 +14,6 @@ NIM_EMBEDDED_KEY =
 
 // Client ID de tu app de Twitch (dev.twitch.tv > Applications; tipo «Pública», con Device Code Flow). Es público.
 TWITCH_CLIENT_ID = 
+
+// Servidor propio que trae videos por link (opcional; también se puede poner en Ajustes).
+CLIP_SERVER_URL = 

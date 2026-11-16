@@ -39,6 +39,7 @@ targets:
         GoogleClientID: "$(GOOGLE_IOS_CLIENT_ID)"
         MetaAppID: "$(META_APP_ID)"
         ClipAIURL: "$(CLIP_AI_URL)"
+        ClipServerURL: "$(CLIP_SERVER_URL)"
         NIMEmbeddedKey: "$(NIM_EMBEDDED_KEY)"
         TwitchClientID: "$(TWITCH_CLIENT_ID)"
         ITSAppUsesNonExemptEncryption: false

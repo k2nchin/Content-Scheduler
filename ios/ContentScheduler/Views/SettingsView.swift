@@ -118,6 +118,17 @@ struct SettingsView: View {
                 SectionLabel(text: "Marca de agua")
                 Card { WatermarkSettings() }
 
+                SectionLabel(text: "Servidor de videos")
+                Card {
+                    Text("Si tienes un servidor que baja videos por link, pon aquí su dirección y aparecerá «Traer por link» en el Clipper.")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                    TextField("https://tuservidor.com", text: Binding(get: { VideoFetcher.server }, set: { VideoFetcher.server = $0 }))
+                        .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    Text("La app le manda el link a POST /fetch y recibe el archivo. Lo que ese servidor haga corre por tu cuenta.")
+                        .font(.caption2).foregroundStyle(Theme.muted)
+                }
+
                 SectionLabel(text: "IA (NVIDIA NIM)")
                 Card {
                     HStack(spacing: 12) {
