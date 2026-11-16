@@ -144,7 +144,7 @@ struct EngineStudioView: View {
                 .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             Picker("Posición", selection: $captionPos) {
                 Text("Arriba").tag("top")
-                Text("Centro").tag("center")
+                Text("Centro").tag("middle")
                 Text("Abajo").tag("bottom")
             }.pickerStyle(.segmented)
             HStack {

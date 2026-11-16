@@ -116,8 +116,13 @@ enum ClipEngine {
     /// Cómo quieres los clips. Los valores son los que entiende el motor.
     struct Options {
         var subtitles = true
-        /// `vertical` (9:16), `square` o `horizontal`.
-        var format = "vertical"
+        /// `vertical`, `vertical_fit`, `vertical_pan`, `vertical_split` u `original`.
+        var format = "vertical" {
+            didSet {
+                let buenos = ["vertical", "vertical_fit", "vertical_pan", "vertical_split", "original"]
+                if !buenos.contains(format) { format = "vertical" }
+            }
+        }
         /// `fast`, `balanced` o `quality`.
         var mode = "balanced"
         /// `auto`, `short` (15-30 s), `medium` (30-60 s) o `long` (1-2 min).
@@ -220,12 +225,13 @@ enum ClipEngine {
             "caption_template": options.captionTemplate,
             "include_broll": options.broll,
         ]
-        if !options.instructions.isEmpty { body["instructions"] = options.instructions }
+        // El motor corta en 500 y 120; se recorta aquí para que no rebote la petición.
+        if !options.instructions.isEmpty { body["instructions"] = String(options.instructions.prefix(500)) }
         if options.workflow != "highlights" {
             body["workflow"] = options.workflow
             var wo: [String: Any] = [:]
-            if options.workflow == "topic" { wo["topic"] = options.topic }
-            if options.workflow == "series" { wo["part_count"] = options.partCount }
+            if options.workflow == "topic" { wo["topic"] = String(options.topic.prefix(120)) }
+            if options.workflow == "series" { wo["part_count"] = min(10, max(2, options.partCount)) }
             if !wo.isEmpty { body["workflow_options"] = wo }
         }
         let obj = try await json(try request("/tasks/", method: "POST", body: body))
@@ -379,10 +385,12 @@ enum ClipEngine {
     }
 
     /// Reescribe los subtítulos a mano, con su tamaño, posición y palabras resaltadas.
+    /// `position` solo puede ser `top`, `middle` o `bottom`.
     static func captions(task: String, clip: String, text: String,
                          position: String = "bottom", size: Int? = nil,
                          highlight: [String] = []) async throws {
-        var body: [String: Any] = ["caption_text": text, "position": position, "highlight_words": highlight]
+        let sitio = ["top", "middle", "bottom"].contains(position) ? position : "bottom"
+        var body: [String: Any] = ["caption_text": text, "position": sitio, "highlight_words": highlight]
         if let size { body["font_size"] = min(72, max(12, size)) }
         _ = try await json(try request("/tasks/\(task)/clips/\(clip)/captions", method: "PATCH", body: body))
     }

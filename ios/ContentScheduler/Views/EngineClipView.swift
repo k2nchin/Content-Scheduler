@@ -189,11 +189,15 @@ struct EngineClipView: View {
     @ViewBuilder private var optionsBox: some View {
         Box {
             Text("CÓMO LOS QUIERES").font(Theme.mono).foregroundStyle(Theme.muted)
-            Picker("Formato", selection: $format) {
-                Text("Vertical 9:16").tag("vertical")
-                Text("Cuadrado").tag("square")
-                Text("Horizontal").tag("horizontal")
+            Text("ENCUADRE").font(Theme.mono).foregroundStyle(Theme.muted)
+            Picker("Encuadre", selection: $format) {
+                Text("Auto 9:16").tag("vertical")
+                Text("Completa").tag("vertical_fit")
+                Text("Paneo").tag("vertical_pan")
+                Text("Partida").tag("vertical_split")
+                Text("Original").tag("original")
             }.pickerStyle(.segmented)
+            Text(encuadreDetalle).font(.caption2).foregroundStyle(Theme.muted)
             Picker("Calidad", selection: $mode) {
                 Text("Rápido").tag("fast")
                 Text("Normal").tag("balanced")
@@ -302,6 +306,17 @@ struct EngineClipView: View {
                 clips = s.clips
                 chosen = chosen.filter { id in s.clips.contains { $0.id == id } }
             }
+        }
+    }
+
+    /// Qué hace cada encuadre, con las palabras del motor.
+    private var encuadreDetalle: String {
+        switch format {
+        case "vertical_fit": return "Se ve todo el video, con barras arriba y abajo."
+        case "vertical_pan": return "La cámara sigue a quien está hablando."
+        case "vertical_split": return "Dos personas, una encima de la otra."
+        case "original": return "Se queda tal cual, sin recortar."
+        default: return "Recorta solo a 9:16 buscando a quien habla."
         }
     }
 
