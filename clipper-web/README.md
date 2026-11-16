@@ -37,8 +37,20 @@ su propia licencia.
 
 ## Levantarlo
 
+En un Mac, de una vez y sin claves de pago:
+
 ```bash
-docker-compose up -d        # frontend :3107, API :8000, worker, Postgres, Redis
+cd clipper-web && ./scripts/arrancar-mac.sh
+```
+
+Instala lo que falte, transcribe con Whisper y elige los momentos con un modelo
+local. Los detalles, y cómo pasarse a AssemblyAI o Gemini si lo quieres más
+rápido, en **[`docs/arrancar-en-el-mac.md`](docs/arrancar-en-el-mac.md)**.
+
+A mano:
+
+```bash
+docker-compose up -d        # web :3001, API :8000, worker, Postgres, Redis
 ```
 
 En local sin Docker, y el resto de la arquitectura, está en `CLAUDE.md` y en `docs/`.
