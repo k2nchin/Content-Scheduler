@@ -247,7 +247,7 @@ struct YouTubeLiveView: View {
                     PendingMarks.pack = PendingMarks.Pack(channel: list.first?.channel ?? "",
                                                           videoID: vid,
                                                           offsets: list.map(\.offset).sorted())
-                    store.show("\(list.count) momentos listos. Elige el video del directo en el Clipper.")
+                    store.show(list.count == 1 ? "1 momento guardado para el Clipper." : "\(list.count) momentos guardados para el Clipper.")
                     dismiss()
                 } label: { Label("Cortar el video con estos momentos", systemImage: "scissors").frame(maxWidth: .infinity) }
                     .buttonStyle(BoxButtonStyle(filled: true))

@@ -131,13 +131,22 @@ struct ClipperView: View {
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: "bookmark.fill").foregroundStyle(Theme.accent)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(pack.offsets.count) momentos de \(pack.channel)").bold()
-                        Text("Elige el archivo del directo y se cortan solos en esos puntos.").font(.caption).foregroundStyle(Theme.muted)
+                        Text(pack.offsets.count == 1 ? "1 momento de \(pack.channel)" : "\(pack.offsets.count) momentos de \(pack.channel)").bold()
+                        Text("Si consigues el archivo del directo, elígelo abajo y se corta solo en esos puntos. Si te lo comparten por Drive, ábrelo en «Archivos o Google Drive».")
+                            .font(.caption).foregroundStyle(Theme.muted)
                     }
                     Spacer(minLength: 0)
                 }
-                Button("Descartar los momentos") { PendingMarks.clear() }
-                    .font(.caption.bold()).foregroundStyle(Theme.red)
+                Divider().overlay(Theme.line)
+                Text("¿No tienes el archivo? Abre cada momento en YouTube y usa su botón «Clip».")
+                    .font(.caption).foregroundStyle(Theme.muted)
+                HStack(spacing: 14) {
+                    Button { ytLiveOpen = true } label: { Label("Ver los momentos", systemImage: "bookmark") }
+                        .font(.caption.bold())
+                    Spacer()
+                    Button("Descartar") { PendingMarks.clear() }
+                        .font(.caption.bold()).foregroundStyle(Theme.red)
+                }
             }
         }
         PhotosPicker(selection: $pick, matching: .videos) {
