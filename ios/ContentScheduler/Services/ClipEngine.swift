@@ -249,10 +249,19 @@ enum ClipEngine {
         let clips = list.compactMap(parseClip)
         return Status(
             state: (obj["status"] as? String) ?? "processing",
-            progress: min(1, max(0, raw > 1 ? raw / 100 : raw)),
+            // El motor cuenta de 0 a 100, nunca de 0 a 1.
+            progress: min(1, max(0, raw / 100)),
             message: (obj["progress_message"] as? String) ?? "",
-            clips: clips.sorted { $0.virality > $1.virality }
+            clips: ordenar(clips)
         )
+    }
+
+    /// Una serie se lee por capítulos; lo demás, por nota.
+    private static func ordenar(_ clips: [Clip]) -> [Clip] {
+        if clips.contains(where: { $0.partNumber > 0 }) {
+            return clips.sorted { $0.partNumber < $1.partNumber }
+        }
+        return clips.sorted { $0.virality > $1.virality }
     }
 
     private static func parseClip(_ c: [String: Any]) -> Clip? {
@@ -332,6 +341,43 @@ enum ClipEngine {
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: tmp, to: dest)
         return dest
+    }
+
+    /// Un trabajo anterior, para poder volver a él.
+    struct Job: Identifiable, Hashable {
+        let id: String
+        /// De dónde salió, para reconocerlo en la lista.
+        let source: String
+        let status: String
+        let clips: Int
+        let date: Date?
+
+        var done: Bool { status == "completed" }
+        var working: Bool { status == "processing" || status == "queued" }
+        var failed: Bool { status == "error" || status == "cancelled" }
+    }
+
+    /// El trabajo que quedó a medias al cerrar la app, si lo hubo.
+    static var pending: String {
+        get { UserDefaults.standard.string(forKey: "clip.engine.task") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "clip.engine.task") }
+    }
+
+    /// Los últimos trabajos del motor, los de ahora y los de antes.
+    static func jobs(limit: Int = 15) async throws -> [Job] {
+        let obj = try await json(try request("/tasks/?limit=\(limit)"))
+        let lista = (obj["tasks"] as? [[String: Any]]) ?? []
+        let fechas = ISO8601DateFormatter()
+        fechas.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return lista.compactMap { j in
+            guard let id = j["id"] as? String else { return nil }
+            let cuando = (j["created_at"] as? String) ?? ""
+            return Job(id: id,
+                       source: (j["source_title"] as? String) ?? (j["source_url"] as? String) ?? "Video",
+                       status: (j["status"] as? String) ?? "",
+                       clips: Int(number(j["clips_count"])),
+                       date: fechas.date(from: cuando) ?? ISO8601DateFormatter().date(from: cuando))
+        }
     }
 
     /// Los modos de corte que este motor permite. Si falla, al menos están los highlights.

@@ -34,6 +34,7 @@ struct EngineClipView: View {
     @State private var detail: ClipEngine.Clip?
     @State private var editing: ClipEngine.Clip?
     @State private var merging = false
+    @State private var jobs: [ClipEngine.Job] = []
 
     var body: some View {
         NavigationStack {
@@ -41,7 +42,7 @@ struct EngineClipView: View {
                 HStack {
                     PageTitle(kicker: "Tu iMac", title: "Clipear por link")
                     Spacer(minLength: 0)
-                    Button("Cerrar") { job?.cancel(); dismiss() }
+                    Button("Cerrar") { dismiss() }
                         .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.muted)
                 }
 
@@ -50,6 +51,7 @@ struct EngineClipView: View {
                     if !working {
                         modeBox
                         optionsBox
+                        jobsBox
                     }
                 } else {
                     resultsHeader
@@ -63,6 +65,8 @@ struct EngineClipView: View {
             // Lo que este motor permite lo dice él, no la app.
             workflows = (try? await ClipEngine.workflows()) ?? []
             templates = (try? await ClipEngine.captionTemplates()) ?? []
+            await retomar()
+            await cargarTrabajos()
         }
         .sheet(item: $detail) { c in scoreSheet(c) }
         .sheet(item: $editing) { c in
@@ -89,10 +93,10 @@ struct EngineClipView: View {
                     }
                     Text(status.isEmpty ? "Mandándole el video a tu iMac…" : status)
                         .font(.caption).foregroundStyle(Theme.muted)
-                    Text("Puedes cerrar la app: el iMac sigue cortando y los clips te esperan aquí.")
+                    Text("Puedes cerrar la app: el iMac sigue cortando y al volver se retoma solo.")
                         .font(.caption2).foregroundStyle(Theme.muted)
-                    Button("Cancelar") { job?.cancel(); working = false; status = "" }
-                        .font(.caption.bold()).foregroundStyle(Theme.red)
+                    Button("Dejar de mirar") { job?.cancel(); working = false; status = "" }
+                        .font(.caption.bold()).foregroundStyle(Theme.muted)
                 }
             } else {
                 Button { start() } label: {
@@ -247,6 +251,7 @@ struct EngineClipView: View {
                 Spacer()
                 Button("Otro video") {
                     clips = []; chosen = []; link = ""; taskID = ""; progress = 0; status = ""
+                    Task { await cargarTrabajos() }
                 }.font(.caption.bold()).foregroundStyle(Theme.muted)
             }
         }
@@ -295,6 +300,93 @@ struct EngineClipView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if chosen.contains(clip.id) { chosen.remove(clip.id) } else { chosen.insert(clip.id) }
+        }
+    }
+
+    /// Los trabajos anteriores: el iMac los guarda aunque cierres la app.
+    @ViewBuilder private var jobsBox: some View {
+        if !jobs.isEmpty {
+            Box {
+                Text("TRABAJOS ANTERIORES").font(Theme.mono).foregroundStyle(Theme.muted)
+                ForEach(jobs) { j in
+                    Button { abrir(j) } label: {
+                        HStack(spacing: 10) {
+                            Circle().fill(colorDe(j)).frame(width: 8, height: 8)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(j.source).lineLimit(1).font(.subheadline)
+                                Text(textoDe(j)).font(.caption2).foregroundStyle(Theme.muted)
+                            }
+                            Spacer(minLength: 0)
+                            if let d = j.date {
+                                Text(d.dayLabel).font(.caption2).foregroundStyle(Theme.muted)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(j.failed)
+                }
+                Text("El iMac los guarda aunque cierres la app.")
+                    .font(.caption2).foregroundStyle(Theme.muted)
+            }
+        }
+    }
+
+    private func colorDe(_ j: ClipEngine.Job) -> Color {
+        j.done ? Theme.ok : (j.failed ? Theme.red : Theme.warn)
+    }
+
+    private func textoDe(_ j: ClipEngine.Job) -> String {
+        if j.working { return "Trabajando…" }
+        if j.failed { return "No salió nada" }
+        return j.clips == 1 ? "1 clip" : "\(j.clips) clips"
+    }
+
+    private func cargarTrabajos() async {
+        let lista = (try? await ClipEngine.jobs()) ?? []
+        await MainActor.run { jobs = lista }
+    }
+
+    /// Si un trabajo quedó a medias al cerrar la app, se vuelve a enganchar a él.
+    private func retomar() async {
+        let guardado = ClipEngine.pending
+        guard !guardado.isEmpty, taskID.isEmpty else { return }
+        guard let s = try? await ClipEngine.status(guardado) else { return }
+        if s.isDone {
+            await MainActor.run {
+                taskID = guardado
+                clips = s.clips
+                chosen = Set(s.clips.prefix(3).map(\.id))
+                ClipEngine.pending = ""
+            }
+        } else if !s.isFailed {
+            await MainActor.run { taskID = guardado; working = true }
+            seguir(guardado)
+        } else {
+            ClipEngine.pending = ""
+        }
+    }
+
+    /// Abre un trabajo de la lista: sus clips, o su progreso si sigue en marcha.
+    private func abrir(_ j: ClipEngine.Job) {
+        Task {
+            guard let s = try? await ClipEngine.status(j.id) else {
+                await MainActor.run { store.show("No pude abrir ese trabajo.") }
+                return
+            }
+            await MainActor.run { taskID = j.id }
+            if s.isDone {
+                await MainActor.run {
+                    clips = s.clips
+                    chosen = Set(s.clips.prefix(3).map(\.id))
+                    if s.clips.isEmpty { store.show("Ese trabajo no dejó ningún clip.") }
+                }
+            } else if s.isFailed {
+                await MainActor.run { store.show(s.message.isEmpty ? "Ese trabajo falló." : s.message) }
+            } else {
+                await MainActor.run { working = true }
+                seguir(j.id)
+            }
         }
     }
 
@@ -369,10 +461,29 @@ struct EngineClipView: View {
         options.workflow = workflow
         options.topic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
         options.partCount = partCount
-        job = Task {
+        Task {
             do {
                 let id = try await ClipEngine.start(link, options: options)
-                await MainActor.run { taskID = id }
+                await MainActor.run {
+                    taskID = id
+                    // Queda apuntado: si cierras la app, al volver se retoma.
+                    ClipEngine.pending = id
+                }
+                seguir(id)
+            } catch {
+                await MainActor.run {
+                    working = false
+                    store.show(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    /// Sigue un trabajo hasta que termina, lo abandones o falle.
+    private func seguir(_ id: String) {
+        job?.cancel()
+        job = Task {
+            do {
                 let result = try await ClipEngine.wait(id) { p, m in
                     progress = p
                     status = m
@@ -381,15 +492,20 @@ struct EngineClipView: View {
                     clips = result
                     chosen = Set(result.prefix(3).map(\.id))
                     working = false
+                    ClipEngine.pending = ""
                     if result.isEmpty { store.show("Tu iMac no encontró nada que valga la pena en ese video.") }
                 }
+                await cargarTrabajos()
             } catch is CancellationError {
+                // Solo se deja de mirar: el iMac sigue cortando y queda apuntado.
                 await MainActor.run { working = false; status = "" }
             } catch {
                 await MainActor.run {
                     working = false
+                    ClipEngine.pending = ""
                     store.show(error.localizedDescription)
                 }
+                await cargarTrabajos()
             }
         }
     }
