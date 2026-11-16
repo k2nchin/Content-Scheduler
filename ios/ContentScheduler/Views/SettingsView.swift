@@ -29,235 +29,13 @@ struct SettingsView: View {
                 AppHeader()
                 PageTitle(kicker: "Tu cuenta", title: "Ajustes")
 
-                SectionLabel(text: "Cuentas conectadas")
-                Card {
-                    // YouTube: varias cuentas
-                    ForEach(youtube.accounts, id: \.id) { acc in
-                        HStack(spacing: 12) {
-                            NetBadge(network: .youtube, size: 32)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(acc.title).bold().lineLimit(1)
-                                Text(acc.id == youtube.channel?.id ? "Cuenta activa" : "Toca para usar esta cuenta")
-                                    .font(.caption).foregroundStyle(acc.id == youtube.channel?.id ? Theme.ok : Theme.muted)
-                            }
-                            Spacer()
-                            Button { closing = acc } label: { Text("Cerrar sesión").font(.caption.bold()) }
-                                .foregroundStyle(Theme.red).buttonStyle(.borderless)
-                        }
-                        .contentShape(Rectangle())
-                        .onTapGesture { youtube.setActive(acc.id) }
-                        Divider().overlay(Theme.line)
-                    }
-                    Button { connectYouTube() } label: {
-                        HStack(spacing: 12) {
-                            NetBadge(network: .youtube, size: 32, dimmed: youtube.isConnected)
-                            Text(connectingYT ? "Conectando…" : youtube.isConnected ? "Agregar otra cuenta de YouTube" : "Conectar YouTube").bold()
-                            Spacer()
-                            Image(systemName: "plus.circle").foregroundStyle(Theme.accent).font(.title3)
-                        }.contentShape(Rectangle())
-                    }.buttonStyle(.plain)
-                    if youtube.isConnected {
-                        Divider().overlay(Theme.line)
-                        NavigationLink { CommentsView() } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "bubble.left.and.bubble.right.fill").foregroundStyle(Theme.accent).frame(width: 32)
-                                VStack(alignment: .leading) {
-                                    Text("Comentarios de YouTube").bold()
-                                    Text("Responder y respuestas automáticas").font(.caption).foregroundStyle(Theme.muted)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
-                            }.contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                    }
-
-                    Divider().overlay(Theme.line)
-
-                    // Facebook + Instagram (Meta)
-                    if meta.hasAccount {
-                        row(.facebook, "Facebook", meta.page.map { "Página: \($0.name)" } ?? "", meta.facebookConnected)
-                        Divider().overlay(Theme.line)
-                        row(.instagram, "Instagram",
-                            meta.page?.igUsername.map { "@\($0)" } ?? "Sin cuenta profesional vinculada a la página",
-                            meta.instagramConnected)
-                        if meta.pages.count > 1 {
-                            Picker("Página", selection: Binding(get: { meta.page?.id ?? "" }, set: { meta.selectedPageID = $0 })) {
-                                ForEach(meta.pages) { Text($0.name).tag($0.id) }
-                            }.font(.footnote)
-                        }
-                        if !meta.tokenValid {
-                            Button { connectMeta() } label: { Label("La sesión caducó · Entrar de nuevo con Facebook", systemImage: "arrow.clockwise") }
-                                .font(.footnote.bold()).foregroundStyle(Theme.warn)
-                        }
-                        Button(role: .destructive) { confirmMeta = true } label: { Text("Desconectar Facebook e Instagram").font(.footnote) }
-                    } else {
-                        Button { connectMeta() } label: {
-                            HStack(spacing: 10) {
-                                NetLogo(network: .facebook, size: 18)
-                                Text(connectingMeta ? "Conectando…" : "Continuar con Facebook").bold()
-                                Spacer()
-                                NetLogo(network: .instagram, size: 18)
-                            }
-                            .foregroundStyle(.white).padding(14)
-                            .background(Network.facebook.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                        }.buttonStyle(.plain)
-                        Text("Conecta tus páginas de Facebook y la cuenta profesional de Instagram vinculada a ellas.")
-                            .font(.caption).foregroundStyle(Theme.muted)
-                    }
-
-                    Divider().overlay(Theme.line)
-                    HStack(spacing: 12) {
-                        NetBadge(network: .tiktok, size: 32, dimmed: true)
-                        VStack(alignment: .leading) {
-                            Text("TikTok").bold().foregroundStyle(Theme.muted)
-                            Text("Próximamente").font(.caption).foregroundStyle(Theme.muted)
-                        }
-                    }
-                }
-
-                SectionLabel(text: "Marca de agua")
-                Card { WatermarkSettings() }
-
-                SectionLabel(text: "Servidor de videos")
-                Card {
-                    Text("Si tienes un servidor que baja videos por link, pon aquí su dirección y aparecerá «Traer por link» en el Clipper.")
-                        .font(.caption).foregroundStyle(Theme.muted)
-                    TextField("https://tuservidor.com", text: Binding(get: { VideoFetcher.server }, set: { VideoFetcher.server = $0 }))
-                        .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    Text("La app le manda el link a POST /fetch y recibe el archivo. Lo que ese servidor haga corre por tu cuenta.")
-                        .font(.caption2).foregroundStyle(Theme.muted)
-                }
-
-                SectionLabel(text: "IA (NVIDIA NIM)")
-                Card {
-                    HStack(spacing: 12) {
-                        Image(systemName: "sparkles").font(.title3).foregroundStyle(Theme.accent).frame(width: 32)
-                        VStack(alignment: .leading) {
-                            Text(nimSaved ? "Clave guardada" : NIM.embeddedKey != nil ? "Clave incluida en la app" : "Sin clave").bold()
-                            Text("La IA elige tus mejores clips y responde comentarios.").font(.caption).foregroundStyle(Theme.muted)
-                        }
-                        Spacer()
-                        if NIM.isConfigured { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.ok).font(.title3) }
-                    }
-                    SecureField(nimSaved ? "Pega una clave nueva para cambiarla" : "Pega tu clave nvapi-…", text: $nimKey)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    TextField("Modelo (vacío = automático: el mejor para cada tarea)", text: $nimModel)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled().font(.footnote)
-                        .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    HStack(spacing: 10) {
-                        Button("Guardar") {
-                            let k = nimKey.trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !k.isEmpty else { return }
-                            NIM.save(key: k); nimKey = ""; nimSaved = true
-                            store.show("Clave de NVIDIA guardada en el Llavero del iPhone")
-                        }.buttonStyle(BoxButtonStyle(filled: true)).disabled(nimKey.isEmpty)
-                        Button(testingNIM ? "Probando…" : "Probar") {
-                            testingNIM = true
-                            Task {
-                                do { _ = try await NIM.test(); store.show("La IA de NVIDIA funciona ✓") } catch { store.show(error.localizedDescription) }
-                                testingNIM = false
-                            }
-                        }.buttonStyle(BoxButtonStyle()).disabled(!NIM.isConfigured || testingNIM)
-                        if nimSaved {
-                            Button("Borrar") { NIM.save(key: ""); nimSaved = false; store.show("Clave borrada") }
-                                .buttonStyle(BoxButtonStyle(color: Theme.red))
-                        }
-                    }
-                    Divider().overlay(Theme.line)
-                    Toggle(isOn: $aiReplies) {
-                        VStack(alignment: .leading) {
-                            Text("Responder comentarios con IA").bold()
-                            Text("La respuesta automática usa la IA; tus reglas por palabra van primero.").font(.caption).foregroundStyle(Theme.muted)
-                        }
-                    }.disabled(!NIM.isConfigured)
-                    Picker("Tono de las respuestas", selection: $tone) {
-                        Text("Dominicano 🇩🇴").tag("dominicano")
-                        Text("Neutro").tag("neutro")
-                    }.font(.footnote)
-                    Text("Consigue tu clave en build.nvidia.com → API Keys. Se guarda solo en este iPhone (Llavero de iOS), no va dentro de la app ni a otro servidor.")
-                        .font(.caption).foregroundStyle(Theme.muted)
-                }
-
-                SectionLabel(text: "Almacenamiento en la nube")
-                Card {
-                    if drive.isConnected {
-                        HStack(spacing: 12) {
-                            Image(systemName: "externaldrive.fill.badge.icloud").font(.title3).foregroundStyle(Theme.accent).frame(width: 32)
-                            VStack(alignment: .leading) {
-                                Text("Google Drive").bold()
-                                Text(drive.email ?? "").font(.caption).foregroundStyle(Theme.muted)
-                            }
-                            Spacer()
-                            Button("Desconectar") { drive.disconnect(); store.show("Google Drive desconectado") }
-                                .font(.caption.bold()).foregroundStyle(Theme.red).buttonStyle(.borderless)
-                        }
-                        Divider().overlay(Theme.line)
-                        Toggle(isOn: Binding(get: { drive.useDrive }, set: { drive.useDrive = $0 })) {
-                            VStack(alignment: .leading) {
-                                Text("Guardar los clips en Drive").bold()
-                                Text("Carpeta «Content Scheduler». No ocupan espacio en tu iPhone; se bajan solo al publicarse.").font(.caption).foregroundStyle(Theme.muted)
-                            }
-                        }
-                    } else {
-                        Button {
-                            connectingDrive = true
-                            Task {
-                                do { try await drive.connect(); store.show("Google Drive conectado") } catch { store.show(error.localizedDescription) }
-                                connectingDrive = false
-                            }
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "externaldrive.badge.icloud").font(.title3).foregroundStyle(Theme.accent).frame(width: 32)
-                                VStack(alignment: .leading) {
-                                    Text(connectingDrive ? "Conectando…" : "Conectar Google Drive").bold()
-                                    Text("Para guardar tus clips en la nube. La app solo ve los archivos que ella crea.").font(.caption).foregroundStyle(Theme.muted)
-                                }
-                                Spacer()
-                                Image(systemName: "plus.circle").foregroundStyle(Theme.accent).font(.title3)
-                            }.contentShape(Rectangle())
-                        }.buttonStyle(.plain)
-                    }
-                }
-
-                SectionLabel(text: "Notificaciones")
-                Card {
-                    Toggle(isOn: Binding(get: { UserDefaults.standard.object(forKey: "cs.notify") as? Bool ?? true },
-                                         set: { v in UserDefaults.standard.set(v, forKey: "cs.notify"); if v { Task { _ = await Notifier.requestPermission() } } })) {
-                        VStack(alignment: .leading) {
-                            Text("Avisos en el teléfono").bold()
-                            Text("Cuando un video se programa, se publica o falla, y cuando llegan comentarios.").font(.caption).foregroundStyle(Theme.muted)
-                        }
-                    }
-                }
-
-                SectionLabel(text: "Seguridad y respaldo")
-                Card {
-                    Toggle(isOn: $weekly) {
-                        VStack(alignment: .leading) {
-                            Text("Reporte semanal").bold()
-                            Text("Cada lunes: seguidores de tus cuentas y lo que publicaste en la semana.").font(.caption).foregroundStyle(Theme.muted)
-                        }
-                    }
-                    Divider().overlay(Theme.line)
-                    Toggle(isOn: $lock) {
-                        VStack(alignment: .leading) {
-                            Text("Bloquear con Face ID").bold()
-                            Text("Pide tu cara o tu código al abrir la app.").font(.caption).foregroundStyle(Theme.muted)
-                        }
-                    }
-                    Divider().overlay(Theme.line)
-                    Button { backupDoc = BackupManager.make(store); exporting = true } label: {
-                        Label("Exportar copia de seguridad", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, alignment: .leading)
-                    }.buttonStyle(.plain)
-                    Button { importing = true } label: {
-                        Label("Restaurar desde una copia", systemImage: "square.and.arrow.down").frame(maxWidth: .infinity, alignment: .leading)
-                    }.buttonStyle(.plain)
-                    Text("Guarda tu cola, horarios, reglas de comentarios y grupos de hashtags (sin los archivos de video).")
-                        .font(.caption).foregroundStyle(Theme.muted)
-                }
-
+                accountsSection
+                watermarkSection
+                serverSection
+                aiSection
+                driveSection
+                notificationsSection
+                backupSection
                 Text("CONTENT SCHEDULER · iOS").font(Theme.mono).foregroundStyle(Theme.muted).frame(maxWidth: .infinity).padding(.top, 20)
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -311,6 +89,256 @@ struct SettingsView: View {
         .contentShape(Rectangle())
     }
 }
+
+    @ViewBuilder private var accountsSection: some View {
+            SectionLabel(text: "Cuentas conectadas")
+            Card {
+                // YouTube: varias cuentas
+                ForEach(youtube.accounts, id: \.id) { acc in
+                    HStack(spacing: 12) {
+                        NetBadge(network: .youtube, size: 32)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(acc.title).bold().lineLimit(1)
+                            Text(acc.id == youtube.channel?.id ? "Cuenta activa" : "Toca para usar esta cuenta")
+                                .font(.caption).foregroundStyle(acc.id == youtube.channel?.id ? Theme.ok : Theme.muted)
+                        }
+                        Spacer()
+                        Button { closing = acc } label: { Text("Cerrar sesión").font(.caption.bold()) }
+                            .foregroundStyle(Theme.red).buttonStyle(.borderless)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { youtube.setActive(acc.id) }
+                    Divider().overlay(Theme.line)
+                }
+                Button { connectYouTube() } label: {
+                    HStack(spacing: 12) {
+                        NetBadge(network: .youtube, size: 32, dimmed: youtube.isConnected)
+                        Text(connectingYT ? "Conectando…" : youtube.isConnected ? "Agregar otra cuenta de YouTube" : "Conectar YouTube").bold()
+                        Spacer()
+                        Image(systemName: "plus.circle").foregroundStyle(Theme.accent).font(.title3)
+                    }.contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                if youtube.isConnected {
+                    Divider().overlay(Theme.line)
+                    NavigationLink { CommentsView() } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "bubble.left.and.bubble.right.fill").foregroundStyle(Theme.accent).frame(width: 32)
+                            VStack(alignment: .leading) {
+                                Text("Comentarios de YouTube").bold()
+                                Text("Responder y respuestas automáticas").font(.caption).foregroundStyle(Theme.muted)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundStyle(Theme.muted)
+                        }.contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+
+                Divider().overlay(Theme.line)
+
+                // Facebook + Instagram (Meta)
+                if meta.hasAccount {
+                    row(.facebook, "Facebook", meta.page.map { "Página: \($0.name)" } ?? "", meta.facebookConnected)
+                    Divider().overlay(Theme.line)
+                    row(.instagram, "Instagram",
+                        meta.page?.igUsername.map { "@\($0)" } ?? "Sin cuenta profesional vinculada a la página",
+                        meta.instagramConnected)
+                    if meta.pages.count > 1 {
+                        Picker("Página", selection: Binding(get: { meta.page?.id ?? "" }, set: { meta.selectedPageID = $0 })) {
+                            ForEach(meta.pages) { Text($0.name).tag($0.id) }
+                        }.font(.footnote)
+                    }
+                    if !meta.tokenValid {
+                        Button { connectMeta() } label: { Label("La sesión caducó · Entrar de nuevo con Facebook", systemImage: "arrow.clockwise") }
+                            .font(.footnote.bold()).foregroundStyle(Theme.warn)
+                    }
+                    Button(role: .destructive) { confirmMeta = true } label: { Text("Desconectar Facebook e Instagram").font(.footnote) }
+                } else {
+                    Button { connectMeta() } label: {
+                        HStack(spacing: 10) {
+                            NetLogo(network: .facebook, size: 18)
+                            Text(connectingMeta ? "Conectando…" : "Continuar con Facebook").bold()
+                            Spacer()
+                            NetLogo(network: .instagram, size: 18)
+                        }
+                        .foregroundStyle(.white).padding(14)
+                        .background(Network.facebook.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }.buttonStyle(.plain)
+                    Text("Conecta tus páginas de Facebook y la cuenta profesional de Instagram vinculada a ellas.")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                }
+
+                Divider().overlay(Theme.line)
+                HStack(spacing: 12) {
+                    NetBadge(network: .tiktok, size: 32, dimmed: true)
+                    VStack(alignment: .leading) {
+                        Text("TikTok").bold().foregroundStyle(Theme.muted)
+                        Text("Próximamente").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+
+    }
+
+    @ViewBuilder private var watermarkSection: some View {
+            SectionLabel(text: "Marca de agua")
+            Card { WatermarkSettings() }
+
+    }
+
+    @ViewBuilder private var serverSection: some View {
+            SectionLabel(text: "Servidor de videos")
+            Card {
+                Text("Si tienes un servidor que baja videos por link, pon aquí su dirección y aparecerá «Traer por link» en el Clipper.")
+                    .font(.caption).foregroundStyle(Theme.muted)
+                TextField("https://tuservidor.com", text: Binding(get: { VideoFetcher.server }, set: { VideoFetcher.server = $0 }))
+                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                Text("La app le manda el link a POST /fetch y recibe el archivo. Lo que ese servidor haga corre por tu cuenta.")
+                    .font(.caption2).foregroundStyle(Theme.muted)
+            }
+
+    }
+
+    @ViewBuilder private var aiSection: some View {
+            SectionLabel(text: "IA (NVIDIA NIM)")
+            Card {
+                HStack(spacing: 12) {
+                    Image(systemName: "sparkles").font(.title3).foregroundStyle(Theme.accent).frame(width: 32)
+                    VStack(alignment: .leading) {
+                        Text(nimSaved ? "Clave guardada" : NIM.embeddedKey != nil ? "Clave incluida en la app" : "Sin clave").bold()
+                        Text("La IA elige tus mejores clips y responde comentarios.").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                    Spacer()
+                    if NIM.isConfigured { Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.ok).font(.title3) }
+                }
+                SecureField(nimSaved ? "Pega una clave nueva para cambiarla" : "Pega tu clave nvapi-…", text: $nimKey)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                TextField("Modelo (vacío = automático: el mejor para cada tarea)", text: $nimModel)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().font(.footnote)
+                    .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                HStack(spacing: 10) {
+                    Button("Guardar") {
+                        let k = nimKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !k.isEmpty else { return }
+                        NIM.save(key: k); nimKey = ""; nimSaved = true
+                        store.show("Clave de NVIDIA guardada en el Llavero del iPhone")
+                    }.buttonStyle(BoxButtonStyle(filled: true)).disabled(nimKey.isEmpty)
+                    Button(testingNIM ? "Probando…" : "Probar") {
+                        testingNIM = true
+                        Task {
+                            do { _ = try await NIM.test(); store.show("La IA de NVIDIA funciona ✓") } catch { store.show(error.localizedDescription) }
+                            testingNIM = false
+                        }
+                    }.buttonStyle(BoxButtonStyle()).disabled(!NIM.isConfigured || testingNIM)
+                    if nimSaved {
+                        Button("Borrar") { NIM.save(key: ""); nimSaved = false; store.show("Clave borrada") }
+                            .buttonStyle(BoxButtonStyle(color: Theme.red))
+                    }
+                }
+                Divider().overlay(Theme.line)
+                Toggle(isOn: $aiReplies) {
+                    VStack(alignment: .leading) {
+                        Text("Responder comentarios con IA").bold()
+                        Text("La respuesta automática usa la IA; tus reglas por palabra van primero.").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                }.disabled(!NIM.isConfigured)
+                Picker("Tono de las respuestas", selection: $tone) {
+                    Text("Dominicano 🇩🇴").tag("dominicano")
+                    Text("Neutro").tag("neutro")
+                }.font(.footnote)
+                Text("Consigue tu clave en build.nvidia.com → API Keys. Se guarda solo en este iPhone (Llavero de iOS), no va dentro de la app ni a otro servidor.")
+                    .font(.caption).foregroundStyle(Theme.muted)
+            }
+
+    }
+
+    @ViewBuilder private var driveSection: some View {
+            SectionLabel(text: "Almacenamiento en la nube")
+            Card {
+                if drive.isConnected {
+                    HStack(spacing: 12) {
+                        Image(systemName: "externaldrive.fill.badge.icloud").font(.title3).foregroundStyle(Theme.accent).frame(width: 32)
+                        VStack(alignment: .leading) {
+                            Text("Google Drive").bold()
+                            Text(drive.email ?? "").font(.caption).foregroundStyle(Theme.muted)
+                        }
+                        Spacer()
+                        Button("Desconectar") { drive.disconnect(); store.show("Google Drive desconectado") }
+                            .font(.caption.bold()).foregroundStyle(Theme.red).buttonStyle(.borderless)
+                    }
+                    Divider().overlay(Theme.line)
+                    Toggle(isOn: Binding(get: { drive.useDrive }, set: { drive.useDrive = $0 })) {
+                        VStack(alignment: .leading) {
+                            Text("Guardar los clips en Drive").bold()
+                            Text("Carpeta «Content Scheduler». No ocupan espacio en tu iPhone; se bajan solo al publicarse.").font(.caption).foregroundStyle(Theme.muted)
+                        }
+                    }
+                } else {
+                    Button {
+                        connectingDrive = true
+                        Task {
+                            do { try await drive.connect(); store.show("Google Drive conectado") } catch { store.show(error.localizedDescription) }
+                            connectingDrive = false
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "externaldrive.badge.icloud").font(.title3).foregroundStyle(Theme.accent).frame(width: 32)
+                            VStack(alignment: .leading) {
+                                Text(connectingDrive ? "Conectando…" : "Conectar Google Drive").bold()
+                                Text("Para guardar tus clips en la nube. La app solo ve los archivos que ella crea.").font(.caption).foregroundStyle(Theme.muted)
+                            }
+                            Spacer()
+                            Image(systemName: "plus.circle").foregroundStyle(Theme.accent).font(.title3)
+                        }.contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+            }
+
+    }
+
+    @ViewBuilder private var notificationsSection: some View {
+            SectionLabel(text: "Notificaciones")
+            Card {
+                Toggle(isOn: Binding(get: { UserDefaults.standard.object(forKey: "cs.notify") as? Bool ?? true },
+                                     set: { v in UserDefaults.standard.set(v, forKey: "cs.notify"); if v { Task { _ = await Notifier.requestPermission() } } })) {
+                    VStack(alignment: .leading) {
+                        Text("Avisos en el teléfono").bold()
+                        Text("Cuando un video se programa, se publica o falla, y cuando llegan comentarios.").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+
+    }
+
+    @ViewBuilder private var backupSection: some View {
+            SectionLabel(text: "Seguridad y respaldo")
+            Card {
+                Toggle(isOn: $weekly) {
+                    VStack(alignment: .leading) {
+                        Text("Reporte semanal").bold()
+                        Text("Cada lunes: seguidores de tus cuentas y lo que publicaste en la semana.").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                }
+                Divider().overlay(Theme.line)
+                Toggle(isOn: $lock) {
+                    VStack(alignment: .leading) {
+                        Text("Bloquear con Face ID").bold()
+                        Text("Pide tu cara o tu código al abrir la app.").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                }
+                Divider().overlay(Theme.line)
+                Button { backupDoc = BackupManager.make(store); exporting = true } label: {
+                    Label("Exportar copia de seguridad", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, alignment: .leading)
+                }.buttonStyle(.plain)
+                Button { importing = true } label: {
+                    Label("Restaurar desde una copia", systemImage: "square.and.arrow.down").frame(maxWidth: .infinity, alignment: .leading)
+                }.buttonStyle(.plain)
+                Text("Guarda tu cola, horarios, reglas de comentarios y grupos de hashtags (sin los archivos de video).")
+                    .font(.caption).foregroundStyle(Theme.muted)
+            }
+
+    }
 
 struct FlowSlots: View {
     let slots: [String]
