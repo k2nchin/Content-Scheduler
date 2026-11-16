@@ -38,6 +38,18 @@ Guarda. Ya tienes `https://clip.tudominio.com`.
 
 ## Paso 3 — Encenderlo en el iMac
 
+### Lo rápido
+
+```bash
+cd clipper-web && ./scripts/tunel.sh
+```
+
+Te pide el token (sin que se vea, para que no quede en el historial), lo guarda en el
+`.env`, enciende el perfil `tunnel`, levanta todo, espera a que el túnel se registre y
+comprueba la dirección pública. Si algo falla te dice qué.
+
+### O a mano
+
 En el `.env` de `clipper-web`:
 
 ```bash
