@@ -112,7 +112,6 @@ struct SettingsView: View {
         }
         .contentShape(Rectangle())
     }
-}
 
     @ViewBuilder private var accountsSection: some View {
             SectionLabel(text: "Cuentas conectadas")
@@ -395,6 +394,7 @@ struct SettingsView: View {
             }
 
     }
+}
 
 struct FlowSlots: View {
     let slots: [String]
