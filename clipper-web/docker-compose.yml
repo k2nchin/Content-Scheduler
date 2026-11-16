@@ -590,6 +590,21 @@ services:
       - AXIOM_DATASET=${AXIOM_DATASET:-supoclip-prod}
     restart: unless-stopped
 
+  # Túnel de Cloudflare: saca el motor de clipping a internet sin abrir un solo
+  # puerto del router y con HTTPS puesto, para usarlo desde el iPhone en la calle.
+  # Se enciende con COMPOSE_PROFILES=tunnel y CLOUDFLARE_TUNNEL_TOKEN en el .env.
+  # Pasos completos en docs/tunel-cloudflare.md.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.11.0
+    container_name: supoclip-cloudflared
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
   # Redis for caching and job queues (useful for video processing)
   redis:
     image: redis:7-alpine

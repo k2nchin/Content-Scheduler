@@ -42,3 +42,11 @@ docker-compose up -d        # frontend :3107, API :8000, worker, Postgres, Redis
 ```
 
 En local sin Docker, y el resto de la arquitectura, está en `CLAUDE.md` y en `docs/`.
+
+## Usarlo desde el iPhone
+
+La app de iOS le manda el link y se trae los clips ya cortados
+(Ajustes → Motor de clipping). En la misma wifi no hace falta nada más que la
+dirección del ordenador; para usarlo desde la calle, el túnel de Cloudflare está
+explicado paso a paso en **[`docs/tunel-cloudflare.md`](docs/tunel-cloudflare.md)**:
+sale a internet con HTTPS sin abrir puertos del router.
