@@ -25,24 +25,27 @@ jobs:
           else
             echo "Sin Secret NIM_API_KEY: la clave se pone en Ajustes de la app."
           fi
-      - name: Generar proyecto de Xcode
-        working-directory: ios
-        run: xcodegen generate
-      - name: Compilar (sin firmar)
+      - name: Generar y compilar
         working-directory: ios
         run: |
-          xcodebuild -project ContentScheduler.xcodeproj -target ContentScheduler \
-            -sdk iphoneos -configuration Release SYMROOT="$PWD/build" \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > build.log 2>&1 || true
+          set +e
+          {
+            echo "=== xcodegen ==="
+            xcodegen generate 2>&1
+            echo "[xcodegen terminó con $?]"
+            echo "=== xcodebuild ==="
+            xcodebuild -project ContentScheduler.xcodeproj -target ContentScheduler \
+              -sdk iphoneos -configuration Release SYMROOT="$PWD/build" \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1
+            echo "[xcodebuild terminó con $?]"
+          } > build.log
           {
             echo "## Resultado"
             echo '```'
-            grep -E "error:" build.log | sed 's#.*/ios/##' | sort -u | head -40
-            grep -E "BUILD (SUCCEEDED|FAILED)" build.log | tail -1
+            grep -E "error:|terminó con|BUILD (SUCCEEDED|FAILED)" build.log | sed 's#.*/ios/##' | sort -u | head -50
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          grep -E "error:|BUILD (SUCCEEDED|FAILED)" build.log || true
-          # Si no compiló, que falle aquí (y no se publique una .ipa vacía)
+          tail -40 build.log
           grep -q "BUILD SUCCEEDED" build.log
           test -f build/Release-iphoneos/ContentScheduler.app/ContentScheduler
       - name: Empaquetar .ipa
@@ -56,6 +59,7 @@ jobs:
         with:
           name: build-log
           path: ios/build.log
+          if-no-files-found: warn
           retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
