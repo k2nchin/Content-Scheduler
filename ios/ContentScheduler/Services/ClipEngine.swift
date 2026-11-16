@@ -289,7 +289,14 @@ enum ClipEngine {
     private static func number(_ v: Any?) -> Double {
         if let d = v as? Double { return d }
         if let i = v as? Int { return Double(i) }
-        if let s = v as? String { return Double(s) ?? 0 }
+        if let s = v as? String {
+            if let d = Double(s) { return d }
+            // El motor manda los tiempos como «MM:SS» o «HH:MM:SS».
+            let partes = s.split(separator: ":").compactMap { Double($0) }
+            if partes.count >= 2 {
+                return partes.reduce(0) { $0 * 60 + $1 }
+            }
+        }
         return 0
     }
 
