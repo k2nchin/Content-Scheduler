@@ -19,6 +19,7 @@ struct ContentSchedulerApp: App {
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
                 .task {
+                    NotificationRouter.shared.start()
                     _ = await Notifier.requestPermission()
                     await Self.sync(store: store, yt: youtube, meta: meta)
                 }

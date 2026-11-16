@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import UIKit
 
 /// Reglas de respuesta automática a comentarios de YouTube, compartidas por la pantalla y el trabajo en segundo plano.
 @MainActor
@@ -110,12 +111,33 @@ enum Notifier {
     static func requestPermission() async -> Bool {
         (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])) ?? false
     }
-    static func send(_ title: String, _ body: String) {
+    /// `open` = dirección que se abre al tocar el aviso (por ejemplo, el momento del directo en YouTube).
+    static func send(_ title: String, _ body: String, open url: URL? = nil) {
         guard UserDefaults.standard.object(forKey: "cs.notify") as? Bool ?? true else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
+        content.sound = url == nil ? .default : UNNotificationSound(named: UNNotificationSoundName("default"))
+        content.interruptionLevel = url == nil ? .active : .timeSensitive   // los momentos llegan aunque el iPhone esté en silencio
+        if let url { content.userInfo = ["open": url.absoluteString] }
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+    }
+}
+
+/// Al tocar un aviso con dirección, abre ese enlace (el momento exacto del directo).
+final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = NotificationRouter()
+
+    func start() { UNUserNotificationCenter.current().delegate = self }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]   // también se ve con la app abierta
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse) async {
+        guard let s = response.notification.request.content.userInfo["open"] as? String, let url = URL(string: s) else { return }
+        await UIApplication.shared.open(url)
     }
 }

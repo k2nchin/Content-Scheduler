@@ -125,7 +125,9 @@ final class YouTubeLiveWatcher {
                        rate: perMinute)
         moments.insert(m, at: 0)
         lastEvent = "🔥 Momento marcado (\(m.rate) msj/min)"
-        Notifier.send("🔥 Momento en \(info.channel)", "\(m.reason) · \(m.rate) msj/min. Toca para abrirlo en YouTube.")
+        Notifier.send("🔥 Momento en \(info.channel)",
+                      "\(m.reason) · \(m.rate) msj/min. Toca para abrir YouTube y dar «Clip».",
+                      open: m.url)
     }
 }
 
