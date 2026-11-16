@@ -24,6 +24,14 @@ struct EngineClipView: View {
     @AppStorage("engine.length") private var length = "auto"
     @AppStorage("engine.subtitles") private var subtitles = true
     @AppStorage("engine.instructions") private var instructions = ""
+    @AppStorage("engine.workflow") private var workflow = "highlights"
+    @AppStorage("engine.template") private var template = "default"
+    @AppStorage("engine.broll") private var broll = false
+    @State private var topic = ""
+    @State private var partCount = 3
+    @State private var workflows: [ClipEngine.Workflow] = []
+    @State private var templates: [ClipEngine.CaptionTemplate] = []
+    @State private var detail: ClipEngine.Clip?
 
     var body: some View {
         NavigationStack {
@@ -37,7 +45,10 @@ struct EngineClipView: View {
 
                 if clips.isEmpty {
                     linkBox
-                    if !working { optionsBox }
+                    if !working {
+                        modeBox
+                        optionsBox
+                    }
                 } else {
                     resultsHeader
                     ForEach(clips) { clip in clipRow(clip) }
@@ -46,6 +57,12 @@ struct EngineClipView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
         }
+        .task {
+            // Lo que este motor permite lo dice él, no la app.
+            workflows = (try? await ClipEngine.workflows()) ?? []
+            templates = (try? await ClipEngine.captionTemplates()) ?? []
+        }
+        .sheet(item: $detail) { c in scoreSheet(c) }
         .onDisappear { job?.cancel() }
     }
 
@@ -84,6 +101,86 @@ struct EngineClipView: View {
 
     // MARK: Cómo quieres los clips
 
+    /// Qué quieres que saque del video: momentos sueltos, una serie, un resumen…
+    @ViewBuilder private var modeBox: some View {
+        if !workflows.isEmpty {
+            Box {
+                Text("QUÉ SACAR DEL VIDEO").font(Theme.mono).foregroundStyle(Theme.muted)
+                ForEach(workflows) { w in
+                    Button { if w.available { workflow = w.id } } label: {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: w.icon)
+                                .foregroundStyle(workflow == w.id ? Theme.accent : Theme.muted)
+                                .frame(width: 24)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(w.name).bold().foregroundStyle(w.available ? Theme.fg : Theme.muted)
+                                Text(w.available ? w.detail : "Tu motor no tiene este modo activado.")
+                                    .font(.caption).foregroundStyle(Theme.muted)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 0)
+                            if workflow == w.id {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.accent)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!w.available)
+                }
+                if workflow == "topic" {
+                    TextField("¿De qué tiene que hablar? Ej: los chistes de Alofoke", text: $topic)
+                        .padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                if workflow == "series" {
+                    Stepper("Partes: \(partCount)", value: $partCount, in: 2...10)
+                }
+            }
+        }
+    }
+
+    /// El desglose de por qué la IA le puso esa nota.
+    private func scoreSheet(_ c: ClipEngine.Clip) -> some View {
+        NavigationStack {
+            Screen {
+                PageTitle(kicker: "Por qué este clip", title: c.hookTitle.isEmpty ? "Puntuación" : c.hookTitle)
+                Box {
+                    scoreRow("Gancho", "Si engancha en los primeros segundos", c.hook)
+                    scoreRow("Enganche", "Si mantiene a la gente hasta el final", c.engagement)
+                    scoreRow("Valor", "Si lo que se dice aporta algo", c.value)
+                    scoreRow("Para compartir", "Si da ganas de mandárselo a alguien", c.shareable)
+                    Divider().overlay(Theme.line)
+                    HStack {
+                        Text("Total").bold()
+                        Spacer()
+                        Text("\(c.virality) de 100").font(Theme.display(20)).foregroundStyle(scoreColor(c.virality))
+                    }
+                }
+                if !c.text.isEmpty {
+                    Box {
+                        Text("LO QUE SE DICE").font(Theme.mono).foregroundStyle(Theme.muted)
+                        Text(c.text).font(.callout)
+                    }
+                }
+                Button("Cerrar") { detail = nil }
+                    .buttonStyle(BoxButtonStyle(filled: false))
+            }
+            .toolbar(.hidden, for: .navigationBar)
+        }
+    }
+
+    private func scoreRow(_ title: String, _ detail: String, _ v: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(title).bold()
+                Spacer()
+                Text("\(v)/25").font(.caption.bold()).foregroundStyle(scoreColor(v * 4))
+            }
+            ProgressView(value: Double(v) / 25).tint(scoreColor(v * 4))
+            Text(detail).font(.caption2).foregroundStyle(Theme.muted)
+        }
+    }
+
     @ViewBuilder private var optionsBox: some View {
         Box {
             Text("CÓMO LOS QUIERES").font(Theme.mono).foregroundStyle(Theme.muted)
@@ -104,6 +201,18 @@ struct EngineClipView: View {
                 Text("90 s").tag("90")
             }.pickerStyle(.segmented)
             Toggle("Subtítulos quemados", isOn: $subtitles).tint(Theme.accent)
+            if subtitles && !templates.isEmpty {
+                Picker("Estilo de subtítulos", selection: $template) {
+                    ForEach(templates) { p in Text(p.name).tag(p.id) }
+                }
+                .pickerStyle(.menu).tint(Theme.accent)
+                if let p = templates.first(where: { $0.id == template }), !p.detail.isEmpty {
+                    Text(p.detail).font(.caption2).foregroundStyle(Theme.muted)
+                }
+            }
+            Toggle("Meter imágenes de apoyo", isOn: $broll).tint(Theme.accent)
+            Text("Pone video de archivo encima cuando solo se ve a alguien hablando.")
+                .font(.caption2).foregroundStyle(Theme.muted)
             Text("QUÉ BUSCAR (opcional)").font(Theme.mono).foregroundStyle(Theme.muted)
             TextField("Por ejemplo: solo las peleas y los momentos de risa", text: $instructions, axis: .vertical)
                 .lineLimit(1...3)
@@ -133,10 +242,7 @@ struct EngineClipView: View {
     }
 
     private func clipRow(_ clip: ClipEngine.Clip) -> some View {
-        Button {
-            if chosen.contains(clip.id) { chosen.remove(clip.id) } else { chosen.insert(clip.id) }
-        } label: {
-            Box {
+        Box {
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: chosen.contains(clip.id) ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(chosen.contains(clip.id) ? Theme.accent : Theme.muted)
@@ -144,8 +250,16 @@ struct EngineClipView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(clip.hookTitle.isEmpty ? "Clip \(Int(clip.start / 60)) min" : clip.hookTitle)
                             .bold().multilineTextAlignment(.leading)
-                        Text("\(Int(clip.duration)) s · desde el minuto \(Int(clip.start / 60))")
-                            .font(.caption).foregroundStyle(Theme.muted)
+                        HStack(spacing: 6) {
+                            if clip.partNumber > 0 {
+                                Text("PARTE \(clip.partNumber)")
+                                    .font(.caption2.bold()).foregroundStyle(Theme.bg)
+                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .background(Theme.accent, in: Capsule())
+                            }
+                            Text("\(Int(clip.duration)) s · desde el minuto \(Int(clip.start / 60))")
+                                .font(.caption).foregroundStyle(Theme.muted)
+                        }
                         if !clip.text.isEmpty {
                             Text(clip.text).font(.caption).foregroundStyle(Theme.muted)
                                 .lineLimit(2).multilineTextAlignment(.leading)
@@ -155,13 +269,17 @@ struct EngineClipView: View {
                     if clip.virality > 0 {
                         VStack(spacing: 2) {
                             Text("\(clip.virality)").font(Theme.display(22)).foregroundStyle(scoreColor(clip.virality))
-                            Text("de 100").font(.caption2).foregroundStyle(Theme.muted)
+                            Text("por qué").font(.caption2).foregroundStyle(Theme.accent)
                         }
+                        .contentShape(Rectangle())
+                        .onTapGesture { detail = clip }
                     }
-                }
             }
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if chosen.contains(clip.id) { chosen.remove(clip.id) } else { chosen.insert(clip.id) }
+        }
     }
 
     private func scoreColor(_ v: Int) -> Color {
@@ -185,6 +303,10 @@ struct EngineClipView: View {
     // MARK: Acciones
 
     private func start() {
+        if workflow == "topic" && topic.trimmingCharacters(in: .whitespaces).isEmpty {
+            store.show("Dile de qué tiene que hablar el clip.")
+            return
+        }
         working = true
         progress = -1
         status = "Mandándole el video a tu iMac…"
@@ -194,6 +316,11 @@ struct EngineClipView: View {
         options.length = length
         options.subtitles = subtitles
         options.instructions = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        options.captionTemplate = template
+        options.broll = broll
+        options.workflow = workflow
+        options.topic = topic.trimmingCharacters(in: .whitespacesAndNewlines)
+        options.partCount = partCount
         job = Task {
             do {
                 let id = try await ClipEngine.start(link, options: options)

@@ -49,6 +49,57 @@ enum ClipEngine {
         let duration: Double
         /// 0 a 100. Cuanto más alto, más posibilidades le ve la IA.
         let virality: Int
+        /// El desglose, 0 a 25 cada uno: gancho, enganche, valor y ganas de compartirlo.
+        let hook: Int
+        let engagement: Int
+        let value: Int
+        let shareable: Int
+        /// En una serie: «Parte 2 de 5». Vacío en los demás modos.
+        let partNumber: Int
+    }
+
+    /// Un modo de corte de los que sabe hacer el motor.
+    struct Workflow: Identifiable, Hashable {
+        let id: String
+        let available: Bool
+        /// Segundos mínimos que tiene que durar el video para este modo.
+        let minSeconds: Int
+
+        var name: String {
+            switch id {
+            case "series": return "Serie"
+            case "topic": return "Por tema"
+            case "recap": return "Resumen"
+            case "trailer": return "Tráiler"
+            default: return "Los mejores momentos"
+            }
+        }
+        var detail: String {
+            switch id {
+            case "series": return "Una historia partida en capítulos: Parte 1, Parte 2…"
+            case "topic": return "Solo los momentos que hablen de lo que tú digas."
+            case "recap": return "Un clip con lo esencial de todo el video."
+            case "trailer": return "Un adelanto que engancha sin destripar el final."
+            default: return "La IA busca los momentos con más posibilidades."
+            }
+        }
+        var icon: String {
+            switch id {
+            case "series": return "square.stack"
+            case "topic": return "magnifyingglass"
+            case "recap": return "text.alignleft"
+            case "trailer": return "sparkles"
+            default: return "star"
+            }
+        }
+    }
+
+    /// Una plantilla de subtítulos del motor.
+    struct CaptionTemplate: Identifiable, Hashable {
+        let id: String
+        let name: String
+        let detail: String
+        let animation: String
     }
 
     struct Status {
@@ -75,6 +126,12 @@ enum ClipEngine {
         var broll = false
         /// Vacío = los mejores momentos. Si pones texto, la IA corta siguiendo esa instrucción.
         var instructions = ""
+        /// `highlights`, `series`, `topic`, `recap` o `trailer`.
+        var workflow = "highlights"
+        /// Solo en `topic`: de qué tiene que hablar el clip.
+        var topic = ""
+        /// Solo en `series`: cuántas partes.
+        var partCount = 3
     }
 
     // MARK: Llamadas
@@ -138,6 +195,13 @@ enum ClipEngine {
             "include_broll": options.broll,
         ]
         if !options.instructions.isEmpty { body["instructions"] = options.instructions }
+        if options.workflow != "highlights" {
+            body["workflow"] = options.workflow
+            var wo: [String: Any] = [:]
+            if options.workflow == "topic" { wo["topic"] = options.topic }
+            if options.workflow == "series" { wo["part_count"] = options.partCount }
+            if !wo.isEmpty { body["workflow_options"] = wo }
+        }
         let obj = try await json(try request("/tasks/", method: "POST", body: body))
         guard let id = obj["task_id"] as? String else {
             throw YTError(message: "Tu motor de clipping no devolvió el trabajo.")
@@ -163,7 +227,12 @@ enum ClipEngine {
                 start: start,
                 end: end,
                 duration: number(c["duration"]) > 0 ? number(c["duration"]) : max(0, end - start),
-                virality: Int(number(c["virality_score"]).rounded())
+                virality: Int(number(c["virality_score"]).rounded()),
+                hook: Int(number(c["hook_score"]).rounded()),
+                engagement: Int(number(c["engagement_score"]).rounded()),
+                value: Int(number(c["value_score"]).rounded()),
+                shareable: Int(number(c["shareability_score"]).rounded()),
+                partNumber: Int(number(c["part_number"]).rounded())
             ))
         }
         return Status(
@@ -229,6 +298,31 @@ enum ClipEngine {
         try? FileManager.default.removeItem(at: dest)
         try FileManager.default.moveItem(at: tmp, to: dest)
         return dest
+    }
+
+    /// Los modos de corte que este motor permite. Si falla, al menos están los highlights.
+    static func workflows() async throws -> [Workflow] {
+        let obj = try await json(try request("/tasks/workflows"))
+        let list = (obj["workflows"] as? [[String: Any]]) ?? []
+        return list.compactMap { w in
+            guard let id = w["id"] as? String else { return nil }
+            return Workflow(id: id,
+                            available: (w["available"] as? Bool) ?? false,
+                            minSeconds: Int(number(w["min_source_seconds"])))
+        }
+    }
+
+    /// Las plantillas de subtítulos que trae el motor.
+    static func captionTemplates() async throws -> [CaptionTemplate] {
+        let obj = try await json(try request("/caption-templates"))
+        let list = (obj["templates"] as? [[String: Any]]) ?? []
+        return list.compactMap { c in
+            guard let id = c["id"] as? String else { return nil }
+            return CaptionTemplate(id: id,
+                                   name: (c["name"] as? String) ?? id,
+                                   detail: (c["description"] as? String) ?? "",
+                                   animation: (c["animation"] as? String) ?? "none")
+        }
     }
 
     /// Comprueba que el iMac contesta y que la clave sirve.
