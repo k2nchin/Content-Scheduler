@@ -29,10 +29,16 @@ Todavía en la pantalla del túnel, pestaña **Public Hostname** → **Add a pub
 | Subdomain | `clip` |
 | Domain | tu dominio |
 | Service → Type | `HTTP` |
-| Service → URL | `backend:8000` |
+| Service → URL | depende de dónde corra el túnel, mira abajo |
 
-Ese `backend:8000` es el nombre del contenedor dentro de Docker. El túnel corre al lado del
-motor, así que le habla directo; el puerto sigue sin asomarse a tu red.
+**La URL cambia según cómo levantes el túnel:**
+
+| Si el túnel corre… | La URL es | Por qué |
+|---|---|---|
+| en Docker (perfil `tunnel`) | `backend:8000` | el nombre del contenedor, que solo ve la red interna de Docker |
+| con `brew` en el Mac | `http://localhost:8000` | desde fuera de Docker, `backend` no existe |
+
+Si te equivocas aquí, el túnel conecta pero Cloudflare te devuelve un **502**.
 
 Guarda. Ya tienes `https://clip.tudominio.com`.
 
@@ -48,7 +54,31 @@ Te pide el token (sin que se vea, para que no quede en el historial), lo guarda 
 `.env`, enciende el perfil `tunnel`, levanta todo, espera a que el túnel se registre y
 comprueba la dirección pública. Si algo falla te dice qué.
 
-### O a mano
+### O con brew, sin Docker para el túnel
+
+Si prefieres que el túnel sea un servicio del Mac en vez de un contenedor:
+
+```bash
+brew install cloudflared
+sudo cloudflared service install <token>
+```
+
+`service install` ya lo deja corriendo y arrancando solo con el Mac. **No lances además
+`cloudflared tunnel run`**: tendrías dos conectores del mismo túnel a la vez.
+
+Comprobar que vive:
+
+```bash
+sudo launchctl list | grep cloudflared
+cloudflared tunnel info <nombre-del-tunel>
+```
+
+Por este camino el Public Hostname apunta a `http://localhost:8000`, y el motor lo levantas
+aparte con `docker-compose up -d` (sin el perfil `tunnel`).
+
+Para quitarlo: `sudo cloudflared service uninstall`.
+
+### O a mano, con el túnel en Docker
 
 En el `.env` de `clipper-web`:
 
