@@ -482,6 +482,22 @@ enum StudioExport {
         return ex.status == .completed ? dest : nil
     }
 
+    /// Recorta un clip ya creado, sin volver a procesarlo.
+    static func trim(_ url: URL, start: Double, end: Double) async throws -> URL {
+        let asset = AVURLAsset(url: url)
+        guard let ex = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+            throw YTError(message: "No se pudo recortar el clip.")
+        }
+        let dest = AppStore.videosDir.appendingPathComponent(UUID().uuidString + ".mp4")
+        ex.outputURL = dest
+        ex.outputFileType = .mp4
+        ex.timeRange = CMTimeRange(start: CMTime(seconds: start, preferredTimescale: 600),
+                                   end: CMTime(seconds: end, preferredTimescale: 600))
+        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in ex.exportAsynchronously { c.resume() } }
+        guard ex.status == .completed else { throw YTError(message: "No se pudo recortar: \(ex.error?.localizedDescription ?? "error")") }
+        return dest
+    }
+
     static func exportAudio(_ asset: AVAsset, range: CMTimeRange) async throws -> URL {
         guard let ex = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
             throw YTError(message: "Este video no tiene audio que se pueda leer.")

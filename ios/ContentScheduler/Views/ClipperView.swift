@@ -79,7 +79,11 @@ struct ClipperView: View {
             .fullScreenCover(isPresented: $live) { LiveClipperView() }
             .sheet(isPresented: $twitchOpen) { TwitchView() }
             .sheet(isPresented: $ytLiveOpen) { YouTubeLiveView() }
-            .sheet(item: $preview) { m in ResultPreview(made: m, onQueue: { t in Task { await queue(m, title: t) } }, onDiscard: { discard(m) }) }
+            .sheet(item: $preview) { m in
+                ResultPreview(made: m,
+                              onQueue: { t, cut in Task { await queue(m, title: t, trim: cut) } },
+                              onDiscard: { discard(m) })
+            }
             .fileImporter(isPresented: $importingFile, allowedContentTypes: [.movie, .video, .mpeg4Movie, .quickTimeMovie]) { result in
                 guard case .success(let url) = result else { return }
                 Task { await loadFile(url); if source != nil { step = .ajustes } }
@@ -282,7 +286,7 @@ struct ClipperView: View {
             }
         }
         if !made.isEmpty {
-            Button { Task { for m in made { await queue(m, title: m.title) } } } label: { Text("Mandar todos a la cola (\(made.count))") }
+            Button { Task { for m in made { await queue(m, title: m.title, trim: nil) } } } label: { Text("Mandar todos a la cola (\(made.count))") }
                 .buttonStyle(PrimaryButtonStyle()).disabled(working)
         }
         Button { discardAll(); cleanup(); step = .fuente } label: { Text("Nuevo video").frame(maxWidth: .infinity) }
@@ -677,9 +681,14 @@ struct ClipperView: View {
     }
 
     /// Manda un clip a la cola (con los textos de la IA) y, si está activado, a Google Drive.
-    private func queue(_ m: Made, title: String) async {
+    private func queue(_ m: Made, title: String, trim: ClosedRange<Double>? = nil) async {
         guard made.contains(where: { $0.id == m.id }) else { return }
-        let id = await store.addVideo(from: m.url, youtubeConnected: youtube.isConnected)
+        var file = m.url
+        if let trim {
+            do { file = try await StudioExport.trim(m.url, start: trim.lowerBound, end: trim.upperBound) }
+            catch { store.show(error.localizedDescription) }
+        }
+        let id = await store.addVideo(from: file, youtubeConnected: youtube.isConnected)
         store.update(id) {
             $0.title = String(title.prefix(100))
             if let ai = m.clip.ai {
@@ -687,10 +696,11 @@ struct ClipperView: View {
                 if !ai.hashtags.isEmpty { $0.tags = ai.hashtags.joined(separator: " ") }
             }
         }
-        if drive.isConnected && drive.useDrive, let did = try? await drive.upload(m.url, name: "\(title.prefix(40)).mp4") {
+        if drive.isConnected && drive.useDrive, let did = try? await drive.upload(file, name: "\(title.prefix(40)).mp4") {
             store.update(id) { $0.driveID = did }
             store.deleteVideoFile(of: id)
         }
+        if file != m.url { try? FileManager.default.removeItem(at: m.url) }
         made.removeAll { $0.id == m.id }
         store.show("Clip en la cola ✓")
         if made.isEmpty { cleanup(); step = .fuente }
@@ -747,11 +757,19 @@ struct ResultCard: View {
 /// Ver un clip terminado, cambiar su título y decidir: a la cola o descartar.
 struct ResultPreview: View {
     let made: ClipperView.Made
-    let onQueue: (String) -> Void
+    let onQueue: (String, ClosedRange<Double>?) -> Void
     let onDiscard: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var player: AVPlayer?
+    @State private var dur = 0.0
+    @State private var from = 0.0
+    @State private var to = 0.0
+
+    /// ¿Se movió el corte respecto al clip completo?
+    private var trimmed: Bool { from > 0.15 || to < dur - 0.15 }
+    private func seek(_ s: Double) { player?.seek(to: CMTime(seconds: s, preferredTimescale: 600)) }
+    private func clock(_ s: Double) -> String { String(format: "%d:%02d", Int(s) / 60, Int(s) % 60) }
 
     var body: some View {
         NavigationStack {
@@ -763,21 +781,62 @@ struct ResultPreview: View {
                     HStack(spacing: 8) {
                         Text("\(ai.score)").font(.system(size: 14, weight: .heavy, design: .monospaced)).foregroundStyle(.white)
                             .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(ai.score >= 70 ? Theme.ok : ai.score >= 45 ? Theme.warn : Theme.muted)
+                            .background(ai.score >= 70 ? Theme.ok : ai.score >= 45 ? Theme.warn : Theme.muted,
+                                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                         Text("Potencial viral").font(.caption).foregroundStyle(Theme.muted)
+                    }
+                    if let s = ai.scores {
+                        Box {
+                            ForEach([("Gancho", s.gancho), ("Enganche", s.enganche), ("Valor", s.valor), ("Compartible", s.compartible)], id: \.0) { name, v in
+                                HStack(spacing: 10) {
+                                    Text(name).font(.caption).frame(width: 86, alignment: .leading).foregroundStyle(Theme.muted)
+                                    GeometryReader { g in
+                                        ZStack(alignment: .leading) {
+                                            Capsule().fill(Theme.bg3)
+                                            Capsule().fill(v >= 70 ? Theme.ok : v >= 45 ? Theme.warn : Theme.muted)
+                                                .frame(width: g.size.width * CGFloat(v) / 100)
+                                        }
+                                    }.frame(height: 7)
+                                    Text("\(v)").font(.system(size: 12, design: .monospaced)).frame(width: 28, alignment: .trailing)
+                                }
+                            }
+                        }
                     }
                     if !ai.reason.isEmpty { Text(ai.reason).font(.footnote).foregroundStyle(Theme.muted) }
                     if !ai.hashtags.isEmpty { Text(ai.hashtags.joined(separator: " ")).font(.caption).foregroundStyle(Theme.accent) }
                 }
+                if dur > 1 {
+                    Box {
+                        Text("AJUSTAR EL CORTE").font(Theme.mono).foregroundStyle(Theme.muted)
+                        HStack {
+                            Text("Inicio").font(.caption).frame(width: 46, alignment: .leading)
+                            Slider(value: $from, in: 0...max(dur - 1, 1)) { e in if !e { seek(from) } }
+                            Text(clock(from)).font(.system(size: 12, design: .monospaced)).frame(width: 40)
+                        }
+                        HStack {
+                            Text("Final").font(.caption).frame(width: 46, alignment: .leading)
+                            Slider(value: $to, in: 1...max(dur, 1)) { e in if !e { seek(max(from, to - 2)) } }
+                            Text(clock(to)).font(.system(size: 12, design: .monospaced)).frame(width: 40)
+                        }
+                        Text("Queda en \(clock(max(0, to - from)))" + (trimmed ? " · recortado" : " · completo"))
+                            .font(.caption).foregroundStyle(Theme.muted)
+                    }
+                }
                 Text("Título").font(.caption).foregroundStyle(Theme.muted)
                 TextField("Título", text: $title, axis: .vertical).lineLimit(1...3).padding(12).background(Theme.bg3, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                Button { onQueue(title); dismiss() } label: { Text("A la cola") }.buttonStyle(PrimaryButtonStyle())
+                Button { onQueue(title, trimmed ? from...to : nil); dismiss() } label: { Text("A la cola") }.buttonStyle(PrimaryButtonStyle())
                 Button(role: .destructive) { onDiscard(); dismiss() } label: { Text("Descartar") }
                     .buttonStyle(PrimaryButtonStyle(filled: false, color: Theme.red))
             }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { dismiss() } } }
             .onAppear { title = made.title; player = AVPlayer(url: made.url); player?.play() }
             .onDisappear { player?.pause() }
+            .task {
+                dur = (try? await AVURLAsset(url: made.url).load(.duration).seconds) ?? 0
+                to = dur
+            }
+            .onChange(of: from) { _, v in if v > to - 1 { from = max(0, to - 1) } }
+            .onChange(of: to) { _, v in if v < from + 1 { to = min(dur, from + 1) } }
         }
     }
 }

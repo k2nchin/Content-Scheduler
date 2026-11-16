@@ -191,8 +191,10 @@ enum NIM {
         - Prioriza un gancho fuerte en los primeros 3 segundos, emoción, humor, polémica, revelaciones o frases citables.
         - Los clips no se enciman.
         - Responde SOLO con JSON válido, sin texto extra, en español, con esta forma:
-        {"clips":[{"start":0,"end":0,"score":0,"hook":"frase de gancho","reason":"por qué funciona","titles":{"youtube":"","instagram":"","facebook":""},"hashtags":["",""]}]}
+        {"clips":[{"start":0,"end":0,"score":0,"scores":{"gancho":0,"enganche":0,"valor":0,"compartible":0},"hook":"frase de gancho","reason":"por qué funciona","titles":{"youtube":"","instagram":"","facebook":""},"hashtags":["",""]}]}
         - score es de 0 a 100 según el potencial viral real; no infles los números.
+        - scores: cada uno de 0 a 100. gancho = agarra en los primeros 3 s. enganche = mantiene viendo hasta el final.
+          valor = deja algo (risa, dato, emoción). compartible = da ganas de mandárselo a alguien.
         """
         let raw = try await chat(.clips, system: system, user: String(format: "Duración total: %.1f s\nTranscripción:\n", duration) + transcript,
                                  maxTokens: 6000, temperature: 0.3)
@@ -202,7 +204,7 @@ enum NIM {
         struct Wrap: Decodable { let clips: [Loose] }
         struct Loose: Decodable {
             var start: Double?; var end: Double?; var score: Double?; var hook: String?; var reason: String?
-            var titles: [String: String]?; var hashtags: [String]?
+            var titles: [String: String]?; var hashtags: [String]?; var scores: [String: Double]?
         }
         let wrap = try JSONDecoder().decode(Wrap.self, from: Data(raw[a...b].utf8))
         var out: [ClipAI.Result] = []
@@ -216,7 +218,12 @@ enum NIM {
                                      score: max(0, min(100, Int(c.score ?? 0))), hook: c.hook ?? "", reason: c.reason ?? "",
                                      titles: .init(youtube: String((c.titles?["youtube"] ?? "").prefix(100)),
                                                    instagram: c.titles?["instagram"] ?? "", facebook: c.titles?["facebook"] ?? ""),
-                                     hashtags: Array(tags.prefix(8))))
+                                     hashtags: Array(tags.prefix(8)),
+                                     scores: c.scores.map { s in
+                                         let v = { (k: String) in max(0, min(100, Int(s[k] ?? 0))) }
+                                         return ClipAI.Result.Scores(gancho: v("gancho"), enganche: v("enganche"),
+                                                                     valor: v("valor"), compartible: v("compartible"))
+                                     }))
         }
         return Array(out.sorted { $0.score > $1.score }.prefix(count))
     }

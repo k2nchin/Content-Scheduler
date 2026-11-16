@@ -14,6 +14,15 @@ enum ClipAI {
         var reason: String
         var titles: Titles
         var hashtags: [String]
+        var scores: Scores?
+
+        /// Por qué puede funcionar el clip, en cuatro medidas.
+        struct Scores: Decodable, Hashable {
+            var gancho: Int      // ¿agarra en los primeros 3 s?
+            var enganche: Int    // ¿mantiene viendo hasta el final?
+            var valor: Int       // ¿deja algo (risa, dato, emoción)?
+            var compartible: Int // ¿da ganas de mandárselo a alguien?
+        }
     }
 
     static var url: URL? {

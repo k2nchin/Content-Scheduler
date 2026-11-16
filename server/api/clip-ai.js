@@ -52,6 +52,12 @@ function cleanClip(c, duration, minLen, maxLen) {
       facebook: s(c.titles?.facebook),
     },
     hashtags: tags.map(t => '#' + String(t).replace(/^#+/, '').replace(/\s+/g, '')).filter(t => t.length > 1).slice(0, 8),
+    scores: c.scores ? {
+      gancho: Math.max(0, Math.min(100, Math.round(Number(c.scores.gancho) || 0))),
+      enganche: Math.max(0, Math.min(100, Math.round(Number(c.scores.enganche) || 0))),
+      valor: Math.max(0, Math.min(100, Math.round(Number(c.scores.valor) || 0))),
+      compartible: Math.max(0, Math.min(100, Math.round(Number(c.scores.compartible) || 0))),
+    } : undefined,
   };
 }
 
@@ -92,7 +98,7 @@ Reglas:
 - Prioriza un gancho fuerte en los primeros 3 segundos, emoción, humor, polémica, revelaciones o frases citables.
 - Los clips no se enciman.
 - Responde SOLO con JSON válido, sin texto extra, en ${language || 'español'}, con esta forma:
-{"clips":[{"start":0,"end":0,"score":0,"hook":"frase de gancho","reason":"por qué funciona","titles":{"youtube":"","instagram":"","facebook":""},"hashtags":["",""]}]}
+{"clips":[{"start":0,"end":0,"score":0,"scores":{"gancho":0,"enganche":0,"valor":0,"compartible":0},"hook":"frase de gancho","reason":"por qué funciona","titles":{"youtube":"","instagram":"","facebook":""},"hashtags":["",""]}]}
 - score es de 0 a 100 según el potencial viral real; no infles los números.`;
 
   try {
