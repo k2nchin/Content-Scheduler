@@ -146,7 +146,12 @@ final class MetaService: NSObject {
     /// Reel en Instagram. Instagram no permite programar por API: se publica en el momento.
     func publishInstagram(file: URL, caption: String) async throws -> String {
         guard let p = page, let ig = p.igID, tokenValid else { throw expired }
-        let created = try await post("\(ig)/media?media_type=REELS&upload_type=resumable&share_to_feed=true&caption=\(enc(caption))", token: p.token)
+        let created: [String: Any]
+        do {
+            created = try await post("\(ig)/media?media_type=REELS&upload_type=resumable&share_to_feed=true&caption=\(enc(caption))", token: p.token)
+        } catch let e as YTError {
+            throw YTError(message: "Al preparar el reel — \(e.message)")
+        }
         guard let container = created["id"] as? String, let uri = created["uri"] as? String, let upURL = URL(string: uri) else {
             throw YTError(message: "Instagram no devolvió dónde subir el video.")
         }
@@ -159,7 +164,12 @@ final class MetaService: NSObject {
             if code == "FINISHED" { break }
             if code == "ERROR" || code == "EXPIRED" { throw YTError(message: "Instagram no pudo procesar el video (\(st["status"] as? String ?? code)).") }
         }
-        let pub = try await post("\(ig)/media_publish?creation_id=\(container)", token: p.token)
+        let pub: [String: Any]
+        do {
+            pub = try await post("\(ig)/media_publish?creation_id=\(container)", token: p.token)
+        } catch let e as YTError {
+            throw YTError(message: "Al publicarlo — \(e.message)")
+        }
         return pub["id"] as? String ?? container
     }
 
@@ -262,10 +272,19 @@ final class MetaService: NSObject {
     static func error(_ json: [String: Any]) -> YTError {
         let e = json["error"] as? [String: Any] ?? (json["debug_info"] as? [String: Any]) ?? [:]
         let code = e["code"] as? Int ?? 0
+        let sub = e["error_subcode"] as? Int ?? 0
         let msg = e["error_user_msg"] as? String ?? e["message"] as? String ?? "error desconocido"
         if code == 190 { return YTError(message: "Facebook no aceptó la sesión (\(msg)). Toca «Continuar con Facebook» en Ajustes.") }
-        if code == 10 || code == 200 { return YTError(message: "Falta un permiso de Meta: \(msg)") }
-        return YTError(message: "Meta: \(msg)")
+        if code == 10 || code == 200 {
+            return YTError(message: "Meta no te deja hacer esto todavía: \(msg)\n\nSuele ser que tu app de Meta está en modo desarrollo, o que falta el permiso instagram_content_publish.")
+        }
+        // Meta devuelve «Request processing failed» para medio mundo. Lo que de
+        // verdad distingue un caso de otro son el código y el subcódigo.
+        if code == 1 || code == 2 {
+            return YTError(message: "Meta falló sin decir por qué (código \(code)\(sub > 0 ? ", subcódigo \(sub)" : "")).\n\nRevisa que tu cuenta de Instagram sea profesional y esté vinculada a la página, y que tu app de Meta no esté en modo desarrollo.")
+        }
+        let detalle = sub > 0 ? "\(msg) (código \(code), subcódigo \(sub))" : "\(msg) (código \(code))"
+        return YTError(message: "Meta: \(detalle)")
     }
 }
 
