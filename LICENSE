@@ -1,0 +1,19 @@
+Copyright (c) 2026 k2nchin — Content Scheduler. Todos los derechos reservados.
+
+Este repositorio contiene dos tipos de código con licencias distintas:
+
+1. Código propio de Content Scheduler (todo excepto la carpeta clipper-web/):
+   la app de iOS (ios/), el servidor (server/), el sitio web (docs/) y el resto
+   de archivos. Queda prohibido copiar, modificar, distribuir, sublicenciar o
+   usar este código, total o parcialmente, sin permiso previo y por escrito del
+   titular. Que el código sea visible en GitHub no concede ninguna licencia.
+
+2. clipper-web/: obra derivada de SupoClip (https://github.com/FujiwaraChoki/supoclip),
+   de Sami Hindi, distribuida bajo la GNU Affero General Public License v3.0.
+   Se rige únicamente por clipper-web/LICENSE, no por este archivo. Los cambios
+   de Content Scheduler dentro de esa carpeta también se publican bajo AGPL-3.0.
+
+Las marcas, el nombre y el logo de Content Scheduler no se licencian bajo
+ninguna de las dos licencias.
+
+EL SOFTWARE SE ENTREGA "TAL CUAL", SIN GARANTÍA DE NINGÚN TIPO.
