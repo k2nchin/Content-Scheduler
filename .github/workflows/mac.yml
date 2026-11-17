@@ -1,0 +1,40 @@
+name: App de Mac (.dmg)
+
+on:
+  push:
+    paths: ["clipper-web/escritorio/mac/**", ".github/workflows/mac.yml"]
+  workflow_dispatch:
+
+jobs:
+  construir:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construir la app y el dmg
+        working-directory: clipper-web/escritorio/mac
+        run: |
+          set +e
+          { ./construir.sh 2>&1; echo "[terminó con $?]"; } > build.log
+          {
+            echo "## Resultado"
+            echo '```'
+            grep -E "error:|warning:|terminó con|Listo" build.log | head -40
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          tail -40 build.log
+          test -f "Content Scheduler.dmg"
+
+      - name: Guardar el registro
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-build-log
+          path: clipper-web/escritorio/mac/build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ContentScheduler-dmg
+          path: clipper-web/escritorio/mac/Content Scheduler.dmg
