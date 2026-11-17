@@ -223,7 +223,7 @@ def _windowed_transcript(minutes: int) -> str:
 async def test_analysis_forwards_instructions_to_every_window_and_the_rerank(monkeypatch, instructions):
     prompts = []
 
-    async def fake_run(agent, prompt, timeout_seconds=None):
+    async def fake_run(agent, prompt, timeout_seconds=None, **_):
         prompts.append(prompt)
         return SimpleNamespace(output=ai_module.TranscriptAnalysis(most_relevant_segments=[], summary="", key_topics=[]))
 

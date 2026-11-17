@@ -7,6 +7,9 @@ from .runtime_settings import get_cached_setting, setting_prefers_admin
 load_dotenv()
 
 _config_override = None
+# Which Gemini key the pool is on. A key that hits its daily quota is
+# retired for the rest of the process by advancing this.
+_google_key_index = 0
 LOCAL_OLLAMA_BASE_URL = "http://localhost:11434/v1"
 DOCKER_OLLAMA_BASE_URL = "http://host.docker.internal:11434/v1"
 
@@ -17,7 +20,15 @@ class Config:
         self.openrouter_api_key = self._get_runtime_setting("OPENROUTER_API_KEY")
         self.openrouter_fallback_model = self._get_optional_env("OPENROUTER_FALLBACK_MODEL") or "openai/gpt-6-luna"
         self.anthropic_api_key = self._get_runtime_setting("ANTHROPIC_API_KEY")
-        self.google_api_key = self._get_runtime_setting("GOOGLE_API_KEY")
+        # One key, several comma-separated in GOOGLE_API_KEY, or extras in
+        # GOOGLE_API_KEY_2..GOOGLE_API_KEY_9. When one runs out of quota the
+        # next takes over for the rest of the process.
+        self.google_api_keys = self._google_api_key_pool()
+        self.google_api_key = (
+            self.google_api_keys[_google_key_index % len(self.google_api_keys)]
+            if self.google_api_keys
+            else None
+        )
         self.youtube_data_api_key = self._get_runtime_setting("YOUTUBE_DATA_API_KEY")
         self.ollama_base_url = self._get_runtime_setting("OLLAMA_BASE_URL")
         self.ollama_api_key = self._get_runtime_setting("OLLAMA_API_KEY")
@@ -390,6 +401,20 @@ class Config:
         return normalized or None
 
     @classmethod
+    def _google_api_key_pool(cls) -> list[str]:
+        """Every Gemini key available, in the order they are tried, without repeats."""
+        raw = [cls._get_runtime_setting("GOOGLE_API_KEY") or ""]
+        for index in range(2, 10):
+            raw.append(cls._get_optional_env(f"GOOGLE_API_KEY_{index}") or "")
+        keys: list[str] = []
+        for entry in raw:
+            for key in entry.replace(";", ",").split(","):
+                key = key.strip()
+                if key and key not in keys:
+                    keys.append(key)
+        return keys
+
+    @classmethod
     def _get_runtime_setting(cls, name: str):
         env_value = cls._get_optional_env(name)
         admin_value = get_cached_setting(name)
@@ -533,3 +558,30 @@ def get_config() -> Config:
 def set_config_override(config: Config | None) -> None:
     global _config_override
     _config_override = config
+
+
+def rotate_google_api_key(exhausted: str | None) -> bool:
+    """Retire the Gemini key that ran out and move to the next one.
+
+    Returns True when a different key is now active, so the caller can build a
+    fresh agent and try again. Several analysis windows run at once: if another
+    one already rotated past ``exhausted``, this reports success without
+    skipping a key that was never tried.
+    """
+    global _google_key_index
+    keys = Config._google_api_key_pool()
+    if len(keys) < 2:
+        return False
+    active = keys[_google_key_index % len(keys)]
+    if exhausted is not None and active != exhausted:
+        return True
+    if _google_key_index >= len(keys) - 1:
+        return False
+    _google_key_index += 1
+    return True
+
+
+def reset_google_api_key_rotation() -> None:
+    """Start again from the first key. For tests and for a fresh worker process."""
+    global _google_key_index
+    _google_key_index = 0

@@ -3,7 +3,7 @@ AI-related functions for transcript analysis with enhanced precision and viralit
 """
 
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Literal
+from typing import Callable, List, Dict, Any, Optional, Literal
 import asyncio
 import logging
 import math
@@ -24,7 +24,7 @@ from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic import AliasChoices, BaseModel, Field, field_validator
 
-from .config import Config, get_config
+from .config import Config, get_config, rotate_google_api_key
 from .clip_duration import clip_duration
 from .runtime_settings import apply_settings_to_process_env
 from .workflows.prompts import instructions_block
@@ -773,6 +773,7 @@ async def plan_broll_cues(
         get_broll_agent(),
         build_broll_plan_prompt(timed_lines, clip_duration, max_cues, earliest_start),
         timeout_seconds=BROLL_PLAN_TIMEOUT_SECONDS,
+        rebuild=get_broll_agent,
     )
     return list(result.output.cues)
 
@@ -1132,10 +1133,30 @@ def _is_transient_model_error(error: Exception) -> bool:
     return False
 
 
+def _is_quota_exhausted_error(error: Exception) -> bool:
+    """A key that is out of quota, as opposed to a provider that is busy.
+
+    Both arrive as HTTP 429, so the body decides: Google answers an exhausted
+    key with RESOURCE_EXHAUSTED or a quota message. Waiting does not fix it
+    before the daily window resets, but another key does.
+    """
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ModelHTTPError) and current.status_code == 429:
+            body = f"{current}".lower()
+            if "resource_exhausted" in body or "quota" in body or "billing" in body:
+                return True
+        current = current.__cause__
+    return False
+
+
 async def _run_transcript_analysis(
     agent: Agent,
     prompt: str,
     timeout_seconds: Optional[float] = None,
+    rebuild: Optional[Callable[[], Agent]] = None,
 ) -> Any:
     """Retry temporary failures on the configured model within one overall budget.
 
@@ -1147,13 +1168,28 @@ async def _run_transcript_analysis(
         timeout_seconds = TRANSCRIPT_ANALYSIS_TIMEOUT_SECONDS
     try:
         async with asyncio.timeout(timeout_seconds):
-            for attempt in range(1, TRANSCRIPT_ANALYSIS_MAX_ATTEMPTS + 1):
+            # A key swap is not a failed attempt, so it does not count here.
+            attempt = 0
+            while True:
+                attempt += 1
                 try:
                     result = await agent.run(prompt)
                     if hasattr(result, "response"):
                         logger.info("AI analysis completed using model %s", result.response.model_name)
                     return result
                 except Exception as error:
+                    # A spent key is not a busy provider: backing off would burn
+                    # the budget waiting for a quota that resets tomorrow. Switch
+                    # to the next key and try again without spending an attempt.
+                    if (
+                        rebuild is not None
+                        and _is_quota_exhausted_error(error)
+                        and rotate_google_api_key(get_config().google_api_key)
+                    ):
+                        logger.warning("Gemini key out of quota; switching to the next one")
+                        agent = rebuild()
+                        attempt -= 1  # The next key gets a full set of attempts.
+                        continue
                     if not _is_transient_model_error(error):
                         raise
                     if attempt == TRANSCRIPT_ANALYSIS_MAX_ATTEMPTS:
@@ -1422,6 +1458,7 @@ async def rerank_candidates(
                 candidates, performance_context, **({"instructions": instructions} if instructions else {})
             ),
             timeout_seconds=RERANK_TIMEOUT_SECONDS,
+            rebuild=get_rerank_agent,
         )
         reranked = apply_candidate_ranking(candidates, result.output)
     except Exception as error:
@@ -1461,7 +1498,9 @@ async def _analyze_transcript_windows(
                 clip_length=clip_length,
                 **({"instructions": instructions} if instructions else {}),
             )
-            result = await _run_transcript_analysis(agent, prompt)
+            result = await _run_transcript_analysis(
+                agent, prompt, rebuild=lambda: get_transcript_agent(clip_length)
+            )
             return result.output
 
     tasks = [asyncio.create_task(run_window(window)) for window in windows]
@@ -1708,7 +1747,8 @@ async def get_most_relevant_parts_by_transcript(
                     performance_context=performance_context,
                     clip_length=clip_length,
                     **steering,
-                )
+                ),
+                rebuild=lambda: get_transcript_agent(clip_length),
             )
             analyses = [result.output]
         else:

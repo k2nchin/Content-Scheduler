@@ -280,6 +280,9 @@ ASSEMBLY_AI_API_KEY=...              # Required: video transcription
 TRANSCRIPTION_LANGUAGE=              # Optional: empty = auto-detect; e.g. es, de, en_us forces it
 LLM=google-gla:gemini-3-flash-preview # Format: provider:model-name
 GOOGLE_API_KEY=...                   # Or OPENAI_API_KEY / ANTHROPIC_API_KEY
+GOOGLE_API_KEY_2=...                 # Optional spares (also _3.._9, or comma-separated
+                                     # in GOOGLE_API_KEY): a key that hits its quota is
+                                     # retired and the next one finishes the job
 OLLAMA_BASE_URL=http://localhost:11434/v1  # Optional for ollama:* models
 OLLAMA_API_KEY=...                   # Optional; required for Ollama Cloud
 RERANK_LLM=                          # Optional; model for the long-video candidate rerank (default: LLM)
