@@ -33,11 +33,13 @@ enum Publisher {
             store.show("Falta el archivo del video. Elígelo otra vez.")
             return
         }
+        if let warning = YouTubeQuota.warning { store.show(warning) }
         store.update(id) { $0.yt = YTInfo(state: .uploading); $0.errorMessage = nil }
         do {
             let videoID = try await yt.upload(post: post, file: file, now: now) { p in
                 store.update(id) { $0.yt?.progress = min(p, 0.99) }
             }
+            YouTubeQuota.recordUpload()
             store.update(id) {
                 $0.yt = YTInfo(videoID: videoID, state: now ? .published : .scheduled, progress: 1, account: yt.channel?.id)
                 $0.status = now ? .published : .scheduled
