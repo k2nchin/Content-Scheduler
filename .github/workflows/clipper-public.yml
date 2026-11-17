@@ -1,0 +1,23 @@
+name: Publicar Clipper (AGPL)
+
+# Copia clipper-web/ al repo público k2nchin/contentscheduler-clipper
+# cada vez que cambia en main, para cumplir la AGPL-3.0.
+on:
+  push:
+    branches: [main]
+    paths: ["clipper-web/**"]
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Subir clipper-web al repo público
+        env:
+          TOKEN: ${{ secrets.CLIPPER_PUSH_TOKEN }}
+        run: |
+          git subtree split --prefix=clipper-web -b clipper-split
+          git push --force "https://x-access-token:${TOKEN}@github.com/k2nchin/contentscheduler-clipper.git" clipper-split:main
