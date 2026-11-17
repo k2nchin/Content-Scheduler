@@ -429,7 +429,7 @@ enum ClipEngine {
     static func startLive(_ link: String, minutesPerChunk: Int = 10, options: Options = Options()) async throws -> Live {
         let clean = link.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let u = URL(string: clean), let s = u.scheme, s == "http" || s == "https" else {
-            throw YTError(message: "Pega el link del directo de YouTube, Twitch o Kick.")
+            throw YTError(message: "Pega el link del directo: youtube.com/@canal/live, twitch.tv/canal o kick.com/canal.")
         }
         let body: [String: Any] = [
             "url": clean,

@@ -205,9 +205,21 @@ def live_channel_source(url: str) -> Optional[str]:
     ended cannot be clipped in one pass. Recording it in chunks can, so this
     tells the two cases apart without a second copy of the URL rules.
     """
-    from .youtube_utils import get_youtube_video_id
+    from .youtube_utils import _is_youtube_host, get_youtube_video_id
 
     if get_youtube_video_id(url):
+        return "youtube"
+    # A channel's current stream has no video id in the URL: youtube.com/@name/live,
+    # /channel/<id>/live, /c/<name>/live, /user/<name>/live. yt-dlp resolves them.
+    try:
+        parsed = urlparse(str(url).strip())
+    except (TypeError, ValueError):
+        return None
+    if (
+        parsed.scheme in {"http", "https"}
+        and _is_youtube_host(parsed.hostname or "")
+        and [part for part in parsed.path.split("/") if part][-1:] == ["live"]
+    ):
         return "youtube"
     try:
         detect_stream_source(url)

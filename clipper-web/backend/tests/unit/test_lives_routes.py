@@ -8,7 +8,13 @@ from src.api.routes.lives import CreateLive, _check_source
 
 @pytest.mark.parametrize("url, source", [
     ("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "youtube"),
+    ("https://www.youtube.com/live/dQw4w9WgXcQ", "youtube"),
+    # El canal en directo no lleva id de video en la dirección.
+    ("https://www.youtube.com/@uncanal/live", "youtube"),
+    ("https://www.youtube.com/channel/UCuAXFkgsw1L7xaCfnd5JJOw/live", "youtube"),
+    ("https://www.youtube.com/c/UnCanal/live", "youtube"),
     ("https://www.twitch.tv/somestreamer", "twitch"),
+    ("https://m.twitch.tv/somestreamer", "twitch"),
     ("https://kick.com/somestreamer", "kick"),
 ])
 def test_the_places_a_live_can_come_from(url, source):
