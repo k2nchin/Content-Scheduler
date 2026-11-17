@@ -648,9 +648,12 @@ services:
   # Graba un directo y va clipeando por trozos mientras sigue en vivo.
   # No corre solo: se lanza cuando quieras, con el enlace del directo.
   #   docker compose run --rm directo <enlace>
+  # Graba un directo a mano desde la terminal:
+  #   docker compose run --rm directo https://twitch.tv/...
   directo:
     build: ./directo
     profiles: ["manual"]
+    entrypoint: ["python", "-u", "grabar.py"]
     volumes:
       - uploads:/app/uploads
     environment:
@@ -659,6 +662,21 @@ services:
       - MINUTOS_POR_TROZO=${MINUTOS_POR_TROZO:-10}
       - ALTURA_MAXIMA=${ALTURA_MAXIMA:-720}
       - OPCIONES_JSON=${OPCIONES_JSON:-}
+    depends_on:
+      - backend
+
+  # Siempre encendido: espera los directos que pides desde el iPhone, los graba
+  # y los va clipeando por trozos. Sin CLIP_API_KEY no hace nada.
+  directo-agente:
+    build: ./directo
+    restart: unless-stopped
+    volumes:
+      - uploads:/app/uploads
+    environment:
+      - CLIP_API_URL=http://backend:8000
+      - CLIP_API_KEY=${CLIP_API_KEY:-}
+      - ALTURA_MAXIMA=${ALTURA_MAXIMA:-720}
+      - AGENTE_ID=${AGENTE_ID:-imac}
     depends_on:
       - backend
 

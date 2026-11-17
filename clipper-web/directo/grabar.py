@@ -55,7 +55,7 @@ def cabeceras() -> dict:
     return {"Authorization": f"Bearer {CLAVE}"}
 
 
-def subir_y_clipear(trozo: Path) -> None:
+def subir_y_clipear(trozo: Path, ajustes: dict | None = None) -> None:
     """Sube el trozo al motor y le pide los clips."""
     log.info("Subiendo %s (%.1f MB)", trozo.name, trozo.stat().st_size / 1e6)
     with trozo.open("rb") as f:
@@ -69,7 +69,7 @@ def subir_y_clipear(trozo: Path) -> None:
         log.error("El motor no devolvió dónde quedó el archivo.")
         return
 
-    cuerpo = {"source": {"url": referencia}, **OPCIONES}
+    cuerpo = {"source": {"url": referencia}, **(ajustes or OPCIONES)}
     r = requests.post(f"{API}/tasks/", headers={**cabeceras(), "Content-Type": "application/json"},
                       json=cuerpo, timeout=120)
     if r.status_code >= 300:
@@ -78,22 +78,25 @@ def subir_y_clipear(trozo: Path) -> None:
     log.info("Clipeando el trozo: trabajo %s", (r.json() or {}).get("task_id", "?"))
 
 
-def main() -> int:
-    if len(sys.argv) < 2:
-        log.error("Dime qué directo grabar:  docker compose run --rm directo <enlace>")
-        return 1
-    enlace = sys.argv[1].strip()
-    if not CLAVE:
-        log.error("Falta CLIP_API_KEY. Sácala con ./scripts/clave-para-el-iphone.sh")
-        return 1
+def grabar(
+    enlace: str,
+    *,
+    minutos: int = MINUTOS,
+    opciones: dict | None = None,
+    debe_parar=None,
+) -> int:
+    """Graba el directo por trozos y los va mandando. Devuelve cuántos mandó.
 
+    ``debe_parar`` se consulta cada pocos segundos: devuelve True y la
+    grabación se cierra ordenadamente, mandando el trozo que quedaba.
+    """
+    ajustes = {**OPCIONES, **(opciones or {})}
     CARPETA.mkdir(parents=True, exist_ok=True)
     marca = time.strftime("%Y%m%d-%H%M%S")
     patron = str(CARPETA / f"{marca}_%03d.mp4")
 
     log.info("Grabando %s", enlace)
-    log.info("Trozos de %d minutos. Cada uno se manda a clipear al cerrarse.", MINUTOS)
-    log.info("Ctrl+C para parar. Lo grabado se queda.")
+    log.info("Trozos de %d minutos. Cada uno se manda a clipear al cerrarse.", minutos)
 
     # yt-dlp saca el directo por la salida estándar y ffmpeg lo va cortando en
     # trozos sin recodificar, que es instantáneo y no gasta procesador.
@@ -104,7 +107,7 @@ def main() -> int:
     )
     corte = subprocess.Popen(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
-         "-c", "copy", "-f", "segment", "-segment_time", str(MINUTOS * 60),
+         "-c", "copy", "-f", "segment", "-segment_time", str(minutos * 60),
          "-reset_timestamps", "1", patron],
         stdin=bajada.stdout,
     )
@@ -119,8 +122,11 @@ def main() -> int:
             for trozo in trozos[:-1]:
                 if trozo.name not in enviados and trozo.stat().st_size > 1_000_000:
                     enviados.add(trozo.name)
-                    subir_y_clipear(trozo)
+                    subir_y_clipear(trozo, ajustes)
             if corte.poll() is not None:
+                break
+            if debe_parar is not None and debe_parar(len(enviados)):
+                log.info("Parando la grabación a petición.")
                 break
             time.sleep(10)
     except KeyboardInterrupt:
@@ -137,9 +143,22 @@ def main() -> int:
     # El directo acabó o lo paraste: queda el último trozo por mandar.
     for trozo in sorted(CARPETA.glob(f"{marca}_*.mp4")):
         if trozo.name not in enviados and trozo.stat().st_size > 1_000_000:
-            subir_y_clipear(trozo)
+            enviados.add(trozo.name)
+            subir_y_clipear(trozo, ajustes)
 
     log.info("Listo. Los clips salen en la app y en la web, trozo por trozo.")
+    return len(enviados)
+
+
+def main() -> int:
+    if len(sys.argv) < 2:
+        log.error("Dime qué directo grabar:  docker compose run --rm directo <enlace>")
+        return 1
+    if not CLAVE:
+        log.error("Falta CLIP_API_KEY. Sácala con ./scripts/clave-para-el-iphone.sh")
+        return 1
+    log.info("Ctrl+C para parar. Lo grabado se queda.")
+    grabar(sys.argv[1].strip())
     return 0
 
 

@@ -35,6 +35,9 @@ struct EngineClipView: View {
     @State private var editing: ClipEngine.Clip?
     @State private var merging = false
     @State private var jobs: [ClipEngine.Job] = []
+    @State private var lives: [ClipEngine.Live] = []
+    @State private var startingLive = false
+    @AppStorage("engine.liveMinutes") private var liveMinutes = 10
 
     var body: some View {
         NavigationStack {
@@ -49,6 +52,7 @@ struct EngineClipView: View {
                 if clips.isEmpty {
                     linkBox
                     if !working {
+                        livesBox
                         modeBox
                         optionsBox
                         jobsBox
@@ -67,6 +71,7 @@ struct EngineClipView: View {
             templates = (try? await ClipEngine.captionTemplates()) ?? []
             await retomar()
             await cargarTrabajos()
+            await cargarDirectos()
         }
         .sheet(item: $detail) { c in scoreSheet(c) }
         .sheet(item: $editing) { c in
@@ -103,7 +108,20 @@ struct EngineClipView: View {
                     Label("Mandar al iMac", systemImage: "desktopcomputer").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(BoxButtonStyle(filled: true))
-                .disabled(link.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(sinLink)
+
+                // Un directo no ha terminado, así que no se puede clipear de una
+                // vez: el iMac lo graba por trozos y cada trozo sale solo.
+                Button { startLive() } label: {
+                    Label(startingLive ? "Avisando al iMac…" : "Es un directo: grabarlo y clipearlo",
+                          systemImage: "dot.radiowaves.left.and.right")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(BoxButtonStyle(filled: false))
+                .disabled(sinLink || startingLive)
+
+                Text("Los clips del directo van saliendo cada \(liveMinutes) minutos, sin esperar a que acabe.")
+                    .font(.caption2).foregroundStyle(Theme.muted)
             }
         }
     }
@@ -306,6 +324,31 @@ struct EngineClipView: View {
         }
     }
 
+    /// Los directos que el iMac está grabando ahora mismo.
+    @ViewBuilder private var livesBox: some View {
+        if !lives.filter({ $0.isRunning }).isEmpty {
+            Box {
+                Text("DIRECTOS EN MARCHA").font(Theme.mono).foregroundStyle(Theme.muted)
+                ForEach(lives.filter { $0.isRunning }) { d in
+                    HStack(spacing: 10) {
+                        Circle().fill(d.status == "grabando" ? Color.red : Theme.muted)
+                            .frame(width: 8, height: 8)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(d.url).lineLimit(1).font(.subheadline)
+                            Text(d.rotulo).font(.caption2).foregroundStyle(Theme.muted)
+                        }
+                        Spacer(minLength: 0)
+                        Button("Parar") { stopLive(d) }
+                            .font(.caption.bold()).foregroundStyle(Theme.accent)
+                            .disabled(d.status == "parando")
+                    }
+                }
+                Text("Cada trozo grabado aparece arriba como un trabajo más.")
+                    .font(.caption2).foregroundStyle(Theme.muted)
+            }
+        }
+    }
+
     /// Los trabajos anteriores: el iMac los guarda aunque cierres la app.
     @ViewBuilder private var jobsBox: some View {
         if !jobs.isEmpty {
@@ -348,6 +391,50 @@ struct EngineClipView: View {
     private func cargarTrabajos() async {
         let lista = (try? await ClipEngine.jobs()) ?? []
         await MainActor.run { jobs = lista }
+    }
+
+    private func cargarDirectos() async {
+        let lista = (try? await ClipEngine.lives()) ?? []
+        await MainActor.run { lives = lista }
+    }
+
+    private var sinLink: Bool { link.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// Encarga el directo. El iMac lo graba; el teléfono solo deja el aviso,
+    /// así que se puede cerrar la app en cuanto conteste.
+    private func startLive() {
+        startingLive = true
+        var options = ClipEngine.Options()
+        options.format = format
+        options.mode = mode
+        options.length = length
+        options.subtitles = subtitles
+        options.captionTemplate = template
+        options.broll = broll
+        Task {
+            do {
+                _ = try await ClipEngine.startLive(link, minutesPerChunk: liveMinutes, options: options)
+                await cargarDirectos()
+                await MainActor.run {
+                    link = ""
+                    startingLive = false
+                    store.show("El iMac está grabando el directo. Los clips van saliendo solos.")
+                }
+            } catch {
+                await MainActor.run {
+                    startingLive = false
+                    store.show(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func stopLive(_ d: ClipEngine.Live) {
+        Task {
+            _ = try? await ClipEngine.stopLive(d.id)
+            await cargarDirectos()
+            await MainActor.run { store.show("Parando. El trozo a medias se clipea igual.") }
+        }
     }
 
     /// Si un trabajo quedó a medias al cerrar la app, se vuelve a enganchar a él.

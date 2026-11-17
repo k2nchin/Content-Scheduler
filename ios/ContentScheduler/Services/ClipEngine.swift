@@ -387,6 +387,79 @@ enum ClipEngine {
         }
     }
 
+    // MARK: Directos
+
+    /// Un directo que el iMac está grabando y clipeando por trozos.
+    struct Live: Identifiable {
+        let id: String
+        let url: String
+        /// `pedido`, `grabando`, `parando`, `terminado` o `error`.
+        let status: String
+        let chunks: Int
+        let minutes: Int
+        let error: String?
+
+        var isRunning: Bool { status == "pedido" || status == "grabando" || status == "parando" }
+        var rotulo: String {
+            switch status {
+            case "pedido": return "Esperando al iMac"
+            case "grabando": return chunks == 0 ? "Grabando el primer trozo" : "Grabando · \(chunks) trozos clipeados"
+            case "parando": return "Cerrando el último trozo"
+            case "error": return error ?? "Falló"
+            default: return chunks == 0 ? "Terminado" : "Terminado · \(chunks) trozos"
+            }
+        }
+    }
+
+    private static func parseLive(_ d: [String: Any]) -> Live? {
+        guard let id = d["id"] as? String else { return nil }
+        return Live(id: id,
+                    url: (d["url"] as? String) ?? "",
+                    status: (d["status"] as? String) ?? "pedido",
+                    chunks: Int(number(d["chunks_sent"])),
+                    minutes: Int(number(d["chunk_minutes"])),
+                    error: d["error_message"] as? String)
+    }
+
+    /// Encarga al iMac que grabe un directo y lo vaya clipeando mientras sigue en vivo.
+    ///
+    /// El teléfono no graba nada: solo deja el encargo apuntado. El iMac lo
+    /// recoge, graba por trozos y cada trozo entra como un trabajo normal, así
+    /// que los clips van apareciendo sin esperar a que el directo acabe.
+    static func startLive(_ link: String, minutesPerChunk: Int = 10, options: Options = Options()) async throws -> Live {
+        let clean = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let u = URL(string: clean), let s = u.scheme, s == "http" || s == "https" else {
+            throw YTError(message: "Pega el link del directo de YouTube, Twitch o Kick.")
+        }
+        let body: [String: Any] = [
+            "url": clean,
+            "chunk_minutes": min(30, max(2, minutesPerChunk)),
+            "options": [
+                "add_subtitles": options.subtitles,
+                "output_format": options.format,
+                "processing_mode": options.mode,
+                "clip_length": options.length,
+                "caption_template": options.captionTemplate,
+                "include_broll": options.broll,
+            ],
+        ]
+        guard let live = parseLive(try await json(try request("/lives/", method: "POST", body: body))) else {
+            throw YTError(message: "Tu motor no devolvió el directo.")
+        }
+        return live
+    }
+
+    /// Los directos de este motor, el de ahora y los de antes.
+    static func lives() async throws -> [Live] {
+        let obj = try await json(try request("/lives/"))
+        return ((obj["lives"] as? [[String: Any]]) ?? []).compactMap(parseLive)
+    }
+
+    /// Pide parar. El trozo que estaba a medias se manda igual antes de cerrar.
+    static func stopLive(_ id: String) async throws -> Live? {
+        parseLive(try await json(try request("/lives/\(id)/stop", method: "POST")))
+    }
+
     /// Los modos de corte que este motor permite. Si falla, al menos están los highlights.
     static func workflows() async throws -> [Workflow] {
         let obj = try await json(try request("/tasks/workflows"))

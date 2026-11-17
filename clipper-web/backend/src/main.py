@@ -195,6 +195,7 @@ def create_app(
     app.include_router(admin_router)
 
     from .api.routes.media import router as media_router
+    from .api.routes.lives import router as lives_router
     from .api.routes.feedback import router as feedback_router
     from .api.routes.billing import router as billing_router
     from .api.routes.api_keys import router as api_keys_router
@@ -207,6 +208,7 @@ def create_app(
     from .api.routes.mcp_oauth import internal_router as mcp_oauth_internal_router
 
     app.include_router(media_router)
+    app.include_router(lives_router)
     app.include_router(feedback_router)
     app.include_router(billing_router)
     app.include_router(api_keys_router)
