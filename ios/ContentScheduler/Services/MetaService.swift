@@ -156,13 +156,22 @@ final class MetaService: NSObject {
             throw YTError(message: "Instagram no devolvió dónde subir el video.")
         }
         try await upload(file: file, to: upURL, token: p.token)
-        // Esperar a que Instagram procese el video
-        for _ in 0..<40 {
-            try await Task.sleep(for: .seconds(3))
+
+        // Instagram procesa el video por su cuenta y tarda lo que quiere: un clip
+        // largo puede pasar de los cinco minutos. Publicarlo antes de que termine
+        // hace que Meta conteste «Request processing failed» sin más explicación.
+        var listo = false
+        for intento in 0..<120 {
+            try await Task.sleep(for: .seconds(intento < 20 ? 3 : 5))
             let st = try await get("\(container)?fields=status_code,status", token: p.token)
             let code = st["status_code"] as? String ?? ""
-            if code == "FINISHED" { break }
-            if code == "ERROR" || code == "EXPIRED" { throw YTError(message: "Instagram no pudo procesar el video (\(st["status"] as? String ?? code)).") }
+            if code == "FINISHED" { listo = true; break }
+            if code == "ERROR" || code == "EXPIRED" {
+                throw YTError(message: "Instagram no pudo procesar el video: \(st["status"] as? String ?? code)")
+            }
+        }
+        guard listo else {
+            throw YTError(message: "Instagram lleva más de ocho minutos procesando el video y no termina. Suele pasar con clips largos o pesados. Prueba con uno más corto, o espera y vuelve a intentarlo.")
         }
         let pub: [String: Any]
         do {
