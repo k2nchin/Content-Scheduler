@@ -5,6 +5,9 @@ on:
     paths: ["clipper-web/escritorio/mac/**", ".github/workflows/mac.yml"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   construir:
     runs-on: macos-15
@@ -38,3 +41,15 @@ jobs:
         with:
           name: ContentScheduler-dmg
           path: clipper-web/escritorio/mac/Content Scheduler.dmg
+
+      - name: Publicar en Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: clipper-web/escritorio/mac
+        run: |
+          # Un nombre sin espacios para poder bajarlo de una línea.
+          cp "Content Scheduler.dmg" ContentScheduler.dmg
+          gh release delete mac-latest -y --cleanup-tag || true
+          gh release create mac-latest ContentScheduler.dmg --target "$GITHUB_SHA" --prerelease \
+            --title "Content Scheduler para Mac" \
+            --notes "Compilado de ${GITHUB_SHA::7}. Sin firmar: la primera vez ábrela con clic derecho → Abrir."
