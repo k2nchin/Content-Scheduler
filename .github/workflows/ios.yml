@@ -65,7 +65,10 @@ jobs:
         with:
           name: ContentScheduler-ipa
           path: ios/ContentScheduler.ipa
+      # Publicar en Releases es una comodidad: si GitHub se pone tonto, la
+      # compilación no debe darse por fallida, que el .ipa ya está hecho.
       - name: Publicar en Releases
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

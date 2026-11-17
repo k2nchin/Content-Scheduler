@@ -43,6 +43,7 @@ jobs:
           path: clipper-web/escritorio/mac/Content Scheduler.dmg
 
       - name: Publicar en Releases
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         working-directory: clipper-web/escritorio/mac
