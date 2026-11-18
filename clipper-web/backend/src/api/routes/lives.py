@@ -9,6 +9,7 @@ así que un agente solo ve y coge los directos de su dueño.
 """
 
 import logging
+import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -24,8 +25,10 @@ from ...stream_source import live_channel_source
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/lives", tags=["lives"])
 
-# Lo que el Mac puede grabar a la vez sin que los trozos se le acumulen.
-MAX_ACTIVE_LIVES = 2
+# Cuántos directos puede tener uno en marcha a la vez. Debe ir a la par con el
+# agente (MAX_DIRECTOS) y con los clips en paralelo (VIDEO_JOB_USER_CONCURRENCY):
+# de nada sirve grabar cinco si solo se clipea de uno en uno.
+MAX_ACTIVE_LIVES = max(1, int(os.getenv("MAX_DIRECTOS_EN_MARCHA", "3")))
 # De qué sitios se puede grabar un directo.
 LIVE_SOURCES = {"youtube", "twitch", "kick"}
 
