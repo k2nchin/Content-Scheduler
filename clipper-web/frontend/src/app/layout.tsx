@@ -130,7 +130,7 @@ export default async function RootLayout({
           </>
         ) : null}
       </head>
-      <body className={`${geistSans.variable} ${geistMono.variable} ${syne.variable} antialiased`}>
+      <body suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} ${syne.variable} antialiased`}>
         <ThemeProvider>
           <NextIntlClientProvider locale={locale} messages={messages}>
             <TooltipProvider>
