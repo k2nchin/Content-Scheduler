@@ -31,6 +31,7 @@ Variables (todas opcionales):
     FACTOR_PICO          cuántas veces más rápido que lo normal tiene que ir el chat (3)
     MIN_MENSAJES_SEG     ritmo mínimo para contar como pico (1.0 mensajes/s)
     VERTICAL             0 para sacar solo el clip horizontal (aún más rápido)
+    PUERTO_WEB           puerto de la página http://localhost:PUERTO (8090; 0 = sin web)
     CAMARA               dónde está la cámara del streamer en el directo:
                          auto (la busca por la cara; si no, hace 9:16 normal) |
                          arriba-derecha | arriba-izquierda | abajo-derecha |
@@ -43,6 +44,7 @@ from __future__ import annotations
 
 import calendar
 import collections
+import http.server
 import json
 import os
 import random
@@ -69,6 +71,7 @@ VERTICAL = os.getenv("VERTICAL", "1") != "0"
 CAMARA = os.getenv("CAMARA", "auto").strip().lower()
 ALTURA = os.getenv("ALTURA_MAXIMA", "720")
 YT_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
+PUERTO_WEB = int(os.getenv("PUERTO_WEB", "8090"))
 SALIDA = Path(os.getenv("CARPETA_CLIPS", str(Path.home() / "Desktop" / "Clips exprés"))).expanduser()
 CANALES_TXT = Path(__file__).with_name("canales.txt")
 
@@ -451,6 +454,92 @@ def teclado() -> None:
                 ev.set()
 
 
+# ── Página en http://localhost:8090 ──────────────────────────────────────────
+
+HTML = """<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Directo exprés — Content Scheduler</title>
+<style>
+:root{--bg:#070708;--bg2:#101012;--fg:#F5F3EF;--muted:#8B8890;--accent:#FF0A8A;--line:#222126}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;padding:24px}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;max-width:1280px;margin:0 auto 22px}
+h1{font-size:22px;margin:0}button{background:var(--accent);color:#fff;border:0;border-radius:11px;padding:10px 16px;font-weight:700;cursor:pointer}
+button.sec{background:var(--bg2);border:1px solid var(--line)}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px;max-width:1280px;margin:0 auto}
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:14px;overflow:hidden}.card video{width:100%;aspect-ratio:9/16;background:#000;display:block}
+.meta{padding:10px 12px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--muted)}
+.meta a{color:var(--fg);text-decoration:none;font-weight:700}p.vacio{color:var(--muted);max-width:1280px;margin:40px auto}
+</style>
+<header>
+  <div><h1>✂️ Directo exprés</h1><small id="sub" style="color:var(--muted)"></small></div>
+  <div id="btns" style="display:flex;gap:8px;flex-wrap:wrap"><button onclick="clipear('')">⚡ Clip ahora (todos)</button></div>
+</header>
+<div id="lista" class="grid"></div>
+<script>
+let vistos = "";
+async function clipear(c){await fetch('/api/clip?canal='+encodeURIComponent(c),{method:'POST'});}
+async function cargar(){
+  const r = await (await fetch('/api/estado')).json();
+  document.getElementById('sub').textContent = 'Canales: ' + (r.canales.join(', ') || 'ninguno') + ' · Carpeta: ' + r.carpeta;
+  const b = document.getElementById('btns');
+  b.innerHTML = '<button onclick="clipear(\'\')">⚡ Clip ahora</button>' +
+    r.canales.map(c => `<button class="sec" onclick="clipear('${c}')">✂️ ${c}</button>`).join('');
+  const clave = r.clips.map(x => x.ruta).join('|');
+  if (clave === vistos) return;
+  vistos = clave;
+  const el = document.getElementById('lista');
+  if (!r.clips.length){ el.innerHTML = '<p class="vacio">Aún no hay clips. Pulsa «⚡ Clip ahora» o espera a que explote el chat.</p>'; return; }
+  el.innerHTML = r.clips.map(c => `<div class="card"><video controls preload="metadata" src="/video/${encodeURI(c.ruta)}"></video>
+    <div class="meta"><span>${c.nombre}</span><a download href="/video/${encodeURI(c.ruta)}">⬇ Bajar</a></div></div>`).join('');
+}
+cargar(); setInterval(cargar, 3000);
+</script></html>"""
+
+
+class Web(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *_a):
+        pass
+
+    def do_POST(self):
+        if self.path.startswith("/api/clip"):
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("canal", [""])[0].lower()
+            for nombre, ev in manuales.items():
+                if not q or q == nombre.lower():
+                    ev.set()
+            self.send_response(204)
+            self.end_headers()
+
+    def do_GET(self):
+        if self.path == "/api/estado":
+            archivos = sorted(SALIDA.glob("*/*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
+            prefer = [p for p in archivos if p.name.endswith("_9x16.mp4")] or archivos
+            datos = {
+                "canales": list(manuales.keys()),
+                "carpeta": str(SALIDA),
+                "clips": [{"nombre": p.name, "ruta": str(p.relative_to(SALIDA))} for p in prefer[:60]],
+            }
+            cuerpo = json.dumps(datos).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(cuerpo)
+            return
+        if self.path.startswith("/video/"):
+            rel = urllib.parse.unquote(self.path.removeprefix("/video/"))
+            archivo = (SALIDA / rel).resolve()
+            if SALIDA.resolve() in archivo.parents and archivo.is_file():
+                self.send_response(200)
+                self.send_header("Content-Type", "video/mp4")
+                self.send_header("Content-Length", str(archivo.stat().st_size))
+                self.end_headers()
+                with archivo.open("rb") as f:
+                    shutil.copyfileobj(f, self.wfile)
+                return
+        cuerpo = HTML.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(cuerpo)
+
+
 def main() -> int:
     for prog in ("ffmpeg", "yt-dlp"):
         if not shutil.which(prog):
@@ -466,6 +555,10 @@ def main() -> int:
     print(f"Clips en: {SALIDA}\nEnter = clip ahora en todos · nombre + Enter = solo ese · Ctrl+C para salir\n", flush=True)
     for c in canales:
         threading.Thread(target=vigilar_canal, args=(c,), name=nombre_de(c), daemon=True).start()
+    if PUERTO_WEB:
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", PUERTO_WEB), Web)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        print(f"🌐 Véalos en vivo en:  http://localhost:{PUERTO_WEB}\n", flush=True)
     threading.Thread(target=teclado, daemon=True).start()
     try:
         while True:
