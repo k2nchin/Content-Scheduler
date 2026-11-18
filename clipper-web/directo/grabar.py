@@ -23,6 +23,7 @@ import os
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import requests
@@ -92,7 +93,8 @@ def grabar(
     """
     ajustes = {**OPCIONES, **(opciones or {})}
     CARPETA.mkdir(parents=True, exist_ok=True)
-    marca = time.strftime("%Y%m%d-%H%M%S")
+    # Único aunque empiecen varias grabaciones en el mismo segundo.
+    marca = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
     patron = str(CARPETA / f"{marca}_%03d.mp4")
 
     log.info("Grabando %s", enlace)

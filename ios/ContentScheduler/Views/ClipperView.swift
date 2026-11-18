@@ -330,8 +330,11 @@ struct ClipperView: View {
                 }
             }
         }
-        Button { Task { await process() } } label: { Text(mode == .manual && clips.isEmpty ? "Marca al menos un clip" : "Crear clips") }
-            .buttonStyle(PrimaryButtonStyle()).disabled(working || (mode == .manual && clips.isEmpty))
+        Button {
+            if mode == .manual && clips.isEmpty { store.show("Primero marca un clip: «Inicio = ahora» y «Final = ahora» mientras ves el video."); return }
+            Task { await process() }
+        } label: { Text(mode == .manual && clips.isEmpty ? "Marca al menos un clip" : "Crear clips") }
+            .buttonStyle(PrimaryButtonStyle()).disabled(working)
     }
 
     @ViewBuilder private var processingStep: some View {
@@ -379,11 +382,14 @@ struct ClipperView: View {
     private var modePicker: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6), GridItem(.flexible(), spacing: 6)], spacing: 6) {
             ForEach(Mode.allCases, id: \.self) { m in
-                Button(m.rawValue) { mode = m }
-                    .font(.footnote).lineLimit(1).minimumScaleFactor(0.8)
-                    .frame(maxWidth: .infinity).padding(.vertical, 10)
-                    .foregroundStyle(mode == m ? .white : Theme.muted).background(mode == m ? Theme.accent : Theme.bg2)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                Button { mode = m } label: {
+                    Text(m.rawValue)
+                        .font(.footnote).lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        .foregroundStyle(mode == m ? .white : Theme.muted).background(mode == m ? Theme.accent : Theme.bg2)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain)
             }
         }
     }
@@ -391,9 +397,12 @@ struct ClipperView: View {
     private var lengthPicker: some View {
         HStack(spacing: 0) {
             ForEach([15.0, 30.0, 60.0], id: \.self) { l in
-                Button("\(Int(l)) s") { length = l }
-                    .font(.footnote).frame(maxWidth: .infinity).padding(.vertical, 8)
-                    .foregroundStyle(length == l ? Theme.bg : Theme.muted).background(length == l ? Theme.fg : Theme.bg2)
+                Button { length = l } label: {
+                    Text("\(Int(l)) s")
+                        .font(.footnote).frame(maxWidth: .infinity).padding(.vertical, 8)
+                        .foregroundStyle(length == l ? Theme.bg : Theme.muted).background(length == l ? Theme.fg : Theme.bg2)
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain)
             }
         }.clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
@@ -407,10 +416,13 @@ struct ClipperView: View {
             }
             lengthPicker
             Stepper("Cuántos clips: \(count)", value: $count, in: 1...15).font(.footnote)
-            Button { Task { await findAI() } } label: {
+            Button {
+            guard ClipAI.isConfigured else { store.show("Falta la clave de NVIDIA: Ajustes → IA. O usa el modo «Energía», que no la necesita."); return }
+            Task { await findAI() }
+        } label: {
                 Label(transcript.isEmpty ? "Analizar con IA" : "Buscar otra vez con IA", systemImage: "sparkles")
             }
-            .buttonStyle(BoxButtonStyle(filled: true)).disabled(working || !ClipAI.isConfigured)
+            .buttonStyle(BoxButtonStyle(filled: true)).disabled(working).opacity(ClipAI.isConfigured ? 1 : 0.5)
             if !transcript.isEmpty {
                 Text("Transcripción lista: \(transcript.count) frases.").font(.caption).foregroundStyle(Theme.muted)
             }

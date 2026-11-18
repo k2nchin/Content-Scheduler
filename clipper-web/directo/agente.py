@@ -12,6 +12,7 @@ Variables:
   CLIP_API_URL   dónde está el motor (por defecto http://backend:8000)
   CLIP_API_KEY   la clave sk_… del dueño (obligatoria)
   AGENTE_ID      nombre de este agente; por defecto el del contenedor
+  MAX_DIRECTOS   cuántos directos graba a la vez (por defecto 3)
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from __future__ import annotations
 import logging
 import os
 import socket
+import threading
 import time
 
 import requests
@@ -36,6 +38,9 @@ ESPERA = max(5, int(os.getenv("SEGUNDOS_ENTRE_CONSULTAS", "15")))
 # Cada cuánto se avisa de que seguimos vivos mientras grabamos. El motor da por
 # muerto a un agente a los dos minutos, así que esto va muy por debajo.
 LATIDO = 20
+# Cuántos directos se graban a la vez. Grabar casi no gasta CPU (no se
+# recodifica); el límite real es el motor clipeando los trozos.
+MAX_DIRECTOS = max(1, int(os.getenv("MAX_DIRECTOS", "3")))
 
 CABECERAS = {"Authorization": f"Bearer {CLAVE}"}
 
@@ -97,8 +102,13 @@ def main() -> int:
     if not CLAVE:
         log.error("Falta CLIP_API_KEY. Sácala con ./scripts/clave-para-el-iphone.sh")
         return 1
-    log.info("Agente %s esperando directos en %s", AGENTE, API)
+    log.info("Agente %s esperando directos en %s (hasta %d a la vez)", AGENTE, API, MAX_DIRECTOS)
+    activos: list[threading.Thread] = []
     while True:
+        activos = [h for h in activos if h.is_alive()]
+        if len(activos) >= MAX_DIRECTOS:
+            time.sleep(ESPERA)
+            continue
         try:
             live = coger()
         except requests.RequestException as e:
@@ -108,7 +118,9 @@ def main() -> int:
         if live is None:
             time.sleep(ESPERA)
             continue
-        grabar_directo(live)
+        hilo = threading.Thread(target=grabar_directo, args=(live,), name=f"directo-{live['id']}", daemon=True)
+        hilo.start()
+        activos.append(hilo)
 
 
 if __name__ == "__main__":

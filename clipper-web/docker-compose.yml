@@ -677,6 +677,28 @@ services:
       - CLIP_API_KEY=${CLIP_API_KEY:-}
       - ALTURA_MAXIMA=${ALTURA_MAXIMA:-720}
       - AGENTE_ID=${AGENTE_ID:-imac}
+      - MAX_DIRECTOS=${MAX_DIRECTOS:-3}
+    depends_on:
+      - backend
+
+  # Vigila tus canales (directo/canales.txt) y graba solos los que entran en
+  # vivo, varios a la vez. Se enciende con:  docker compose --profile vigilar up -d
+  directo-vigilar:
+    build: ./directo
+    profiles: ["vigilar"]
+    restart: unless-stopped
+    entrypoint: ["python", "-u", "vigilar.py"]
+    volumes:
+      - uploads:/app/uploads
+      - ./directo/canales.txt:/app/canales.txt:ro
+    environment:
+      - CLIP_API_URL=http://backend:8000
+      - CLIP_API_KEY=${CLIP_API_KEY:-}
+      - ALTURA_MAXIMA=${ALTURA_MAXIMA:-720}
+      - MINUTOS_POR_TROZO=${MINUTOS_POR_TROZO:-10}
+      - MAX_DIRECTOS=${MAX_DIRECTOS:-3}
+      - MINUTOS_ENTRE_REVISIONES=${MINUTOS_ENTRE_REVISIONES:-2}
+      - OPCIONES_JSON=${OPCIONES_JSON:-}
     depends_on:
       - backend
 
