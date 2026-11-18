@@ -302,13 +302,16 @@ enum ClipEngine {
 
     /// Espera a que termine, avisando del progreso. Devuelve los clips.
     /// Pregunta cada 3 segundos; si el iMac tarda, sigue esperando mientras siga respondiendo.
-    static func wait(_ taskID: String, onProgress: @escaping @MainActor (Double, String) -> Void) async throws -> [Clip] {
+    /// Espera a que termine, avisando del progreso y de los clips que ya hay.
+    /// El motor guarda cada clip en cuanto lo corta, así que `parciales` trae
+    /// los que ya están listos: se pueden ver y publicar sin esperar al resto.
+    static func wait(_ taskID: String, onProgress: @escaping @MainActor (Double, String, [Clip]) -> Void) async throws -> [Clip] {
         var fallos = 0
         while !Task.isCancelled {
             do {
                 let s = try await status(taskID)
                 fallos = 0
-                await onProgress(s.progress, s.message.isEmpty ? "Tu iMac está trabajando…" : s.message)
+                await onProgress(s.progress, s.message.isEmpty ? "Tu iMac está trabajando…" : s.message, s.clips)
                 if s.isDone { return s.clips }
                 if s.isFailed {
                     throw YTError(message: s.message.isEmpty ? "El motor de clipping no pudo con ese video." : s.message)
@@ -321,7 +324,7 @@ enum ClipEngine {
                 if fallos >= 20 {
                     throw YTError(message: "Se perdió la conexión con tu iMac. El trabajo sigue allá; vuelve a entrar más tarde.")
                 }
-                await onProgress(-1, "Reconectando con tu iMac…")
+                await onProgress(-1, "Reconectando con tu iMac…", [])
             }
             try await Task.sleep(for: .seconds(3))
         }

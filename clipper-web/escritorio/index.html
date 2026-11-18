@@ -493,6 +493,7 @@ async function empezar(referencia) {
   try {
     const r = await api('/tasks/', { method: 'POST', body: JSON.stringify(cuerpo) });
     S.tarea = r.task_id;
+    S.yaMostrado = false; S.mostrados = 0;
     ver('trabajando');
     seguir();
   } catch (e) { aviso(e.message); }
@@ -519,6 +520,11 @@ async function seguir() {
     aviso(t.progress_message || 'El motor no pudo con ese video.');
     ver('crear'); cargarTrabajos(); return;
   }
+  // El motor guarda cada clip en cuanto lo corta. En cuanto hay alguno, se
+  // enseña y se puede publicar, mientras los demás siguen saliendo. Solo se
+  // redibuja cuando llega uno nuevo, para no cortar un video que estés viendo.
+  const cuantos = (t.clips || []).length;
+  if (cuantos && cuantos !== S.mostrados) { S.mostrados = cuantos; mostrar(t.clips, true); }
   S.mirando = setTimeout(seguir, 3000);
 }
 
@@ -549,17 +555,21 @@ function minuto(v) {
   return m > 0 ? `min ${m}` : `desde el principio`;
 }
 
-async function mostrar(clips) {
+async function mostrar(clips, parcial = false) {
   // Una serie va en orden de capítulos; lo demás, por nota.
   const esSerie = clips.some(c => c.part_number);
   S.clips = clips.slice().sort((a, b) => esSerie
     ? (a.part_number || 0) - (b.part_number || 0)
     : (b.virality_score || 0) - (a.virality_score || 0));
-  S.marcados = new Set(S.clips.slice(0, 3).map(c => c.id));
+  // Los marcados solo se ponen la primera vez: durante el goteo no se pisa lo
+  // que el usuario ya haya tocado ni lo que esté publicando.
+  if (!S.yaMostrado) { S.marcados = new Set(S.clips.slice(0, 3).map(c => c.id)); S.yaMostrado = true; }
   ver('resultados');
-  $('resumen').textContent = S.clips.length
-    ? `${S.clips.length} ${S.clips.length === 1 ? 'clip' : 'clips'}. Marca los que quieras.`
-    : 'Este video no dio nada que valga la pena. Prueba con otro.';
+  $('resumen').textContent = !S.clips.length
+    ? 'Este video no dio nada que valga la pena. Prueba con otro.'
+    : parcial
+      ? `${S.clips.length} ${S.clips.length === 1 ? 'clip' : 'clips'} y vienen más… publica los que quieras ya.`
+      : `${S.clips.length} ${S.clips.length === 1 ? 'clip' : 'clips'}. Marca los que quieras.`;
 
   $('lista').innerHTML = S.clips.map(c => {
     const v = Math.round(c.virality_score || 0);
@@ -746,6 +756,7 @@ async function cargarTrabajos() {
 
 async function abrirTrabajo(id) {
   S.tarea = id;
+  S.yaMostrado = false;
   try {
     const t = await api('/tasks/' + id);
     if (t.status === 'completed') return mostrar(t.clips || []);

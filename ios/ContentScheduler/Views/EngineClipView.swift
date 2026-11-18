@@ -37,6 +37,7 @@ struct EngineClipView: View {
     @State private var jobs: [ClipEngine.Job] = []
     @State private var lives: [ClipEngine.Live] = []
     @State private var startingLive = false
+    @State private var generando = false   // el iMac sigue cortando más clips
     @AppStorage("engine.liveMinutes") private var liveMinutes = 10
 
     var body: some View {
@@ -59,6 +60,15 @@ struct EngineClipView: View {
                     }
                 } else {
                     resultsHeader
+                    if generando {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Cortando más clips… puedes publicar los de abajo ya.")
+                                .font(.caption).foregroundStyle(Theme.muted)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.bottom, 4)
+                    }
                     ForEach(clips) { clip in clipRow(clip) }
                     saveBar
                 }
@@ -544,6 +554,8 @@ struct EngineClipView: View {
             return
         }
         working = true
+        generando = false
+        clips = []
         progress = -1
         status = "Mandándole el video a tu iMac…"
         var options = ClipEngine.Options()
@@ -580,24 +592,34 @@ struct EngineClipView: View {
         job?.cancel()
         job = Task {
             do {
-                let result = try await ClipEngine.wait(id) { p, m in
+                let result = try await ClipEngine.wait(id) { p, m, parciales in
                     progress = p
                     status = m
+                    // En cuanto hay un clip, se enseña: salimos del modo "trabajando"
+                    // y seguimos marcando que vienen más.
+                    if !parciales.isEmpty {
+                        if working { chosen = Set(parciales.prefix(3).map(\.id)) }
+                        clips = parciales
+                        working = false
+                        generando = true
+                    }
                 }
                 await MainActor.run {
                     clips = result
-                    chosen = Set(result.prefix(3).map(\.id))
+                    if chosen.isEmpty { chosen = Set(result.prefix(3).map(\.id)) }
                     working = false
+                    generando = false
                     ClipEngine.pending = ""
                     if result.isEmpty { store.show("Tu iMac no encontró nada que valga la pena en ese video.") }
                 }
                 await cargarTrabajos()
             } catch is CancellationError {
                 // Solo se deja de mirar: el iMac sigue cortando y queda apuntado.
-                await MainActor.run { working = false; status = "" }
+                await MainActor.run { working = false; generando = false; status = "" }
             } catch {
                 await MainActor.run {
                     working = false
+                    generando = false
                     ClipEngine.pending = ""
                     store.show(error.localizedDescription)
                 }
