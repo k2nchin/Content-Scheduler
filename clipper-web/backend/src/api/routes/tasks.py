@@ -745,9 +745,22 @@ async def _create_task(request: Request, db: AsyncSession, attempt: SourceAttemp
         try:
             source_type = task_service.video_service.determine_source_type(raw_source["url"])
         except ValueError as exc:
-            # Only rejected http(s) stream URLs are a 422 validation error.
-            # Local paths and other non-URL sources keep the historic 404.
-            if not str(raw_source["url"]).strip().lower().startswith(("http://", "https://")):
+            from ...stream_source import live_channel_source
+            url_live = str(raw_source["url"]).strip()
+            if db is not None and live_channel_source(url_live) in {"youtube", "twitch", "kick"}:
+                from ...repositories import live_repository as live_repo
+                live = await live_repo.active_for_url(db, user_id, url_live)
+                if live is None:
+                    live = await live_repo.create_live(db, user_id, url_live, upload_options, 3)
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "LIVE_RECORDING_STARTED",
+                        "message": "🔴 Es un directo en vivo: tu Mac ya empezó a grabarlo por trozos de 3 min. Cada trozo aparecerá solo en la lista de trabajos (/list) al cerrarse.",
+                        "live_id": live["id"],
+                    },
+                ) from None
+            if not url_live.lower().startswith(("http://", "https://")):
                 raise
             raise HTTPException(status_code=422, detail=str(exc)) from None
         if source_type == "youtube":
@@ -780,12 +793,12 @@ async def _create_task(request: Request, db: AsyncSession, attempt: SourceAttemp
                 url_live = raw_source["url"].strip()
                 live = await live_repo.active_for_url(db, user_id, url_live)
                 if live is None:
-                    live = await live_repo.create_live(db, user_id, url_live, upload_options, 10)
+                    live = await live_repo.create_live(db, user_id, url_live, upload_options, 3)
                 raise HTTPException(
                     status_code=422,
                     detail={
                         "code": "LIVE_RECORDING_STARTED",
-                        "message": "🔴 Es un directo en vivo: tu Mac ya empezó a grabarlo por trozos de 10 min. Cada trozo aparecerá solo en la lista de trabajos (/list) al cerrarse.",
+                        "message": "🔴 Es un directo en vivo: tu Mac ya empezó a grabarlo por trozos de 3 min. Cada trozo aparecerá solo en la lista de trabajos (/list) al cerrarse.",
                         "live_id": live["id"],
                     },
                 ) from None
