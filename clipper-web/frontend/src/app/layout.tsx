@@ -129,6 +129,9 @@ export default async function RootLayout({
             />
           </>
         ) : null}
+        <Script id="strip-ext-attrs" strategy="beforeInteractive">
+          {`(()=>{const clean=el=>{if(!el||!el.attributes)return;for(const a of [...el.attributes])if(a.name.startsWith('bis_')||a.name.startsWith('__processed_'))el.removeAttribute(a.name)};const sweep=()=>{document.querySelectorAll('*').forEach(clean)};sweep();new MutationObserver(ms=>{for(const m of ms){if(m.type==='attributes')clean(m.target);for(const n of m.addedNodes)if(n.nodeType===1){clean(n);n.querySelectorAll?.('*').forEach(clean)}}}).observe(document.documentElement,{attributes:true,childList:true,subtree:true})})();`}
+        </Script>
       </head>
       <body suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} ${syne.variable} antialiased`}>
         <ThemeProvider>
