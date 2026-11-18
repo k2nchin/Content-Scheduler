@@ -1479,6 +1479,8 @@ function FramingGlyph({ kind }: { kind: OutputFormat }) {
         <span className="h-6 w-10 rounded-[3px] border-2 border-foreground/70" />
       ) : kind === "vertical_fit" ? (
         <span className="flex h-9 w-5 items-center rounded-[3px] border-2 border-foreground/70"><span className="h-3 w-full bg-foreground/30" /></span>
+      ) : kind === "vertical_streamer" ? (
+        <span className="flex h-9 w-5 flex-col items-center gap-0.5 rounded-[3px] border-2 border-foreground/70 p-0.5"><span className="h-2.5 w-3 rounded-[2px] bg-brand" /><span className="w-full flex-1 rounded-[1px] bg-foreground/30" /></span>
       ) : kind === "vertical_split" ? (
         <span className="flex h-9 w-5 flex-col gap-0.5 rounded-[3px] border-2 border-foreground/70 p-0.5"><span className="flex-1 rounded-[1px] bg-foreground/30" /><span className="flex-1 rounded-[1px] bg-foreground/30" /></span>
       ) : (

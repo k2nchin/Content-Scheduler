@@ -292,3 +292,34 @@ def choose_reaction_layout(
     if inset is None:
         return None
     return build_reaction_layout(width, height, duration, face, inset, samples, scene_cuts)
+
+
+def build_streamer_layout(
+    path: Path, width: int, height: int, duration: float, samples: Sequence[FaceFrame],
+    scene_cuts: Sequence[float] = (),
+) -> Dict[str, Any]:
+    """Formato streamer: cámara redondeada arriba + juego abajo + fondo difuminado.
+    Si detecta la cara y el borde de la webcam los usa; si no, busca cualquier
+    cara en una esquina o toma la esquina superior derecha típica de OBS."""
+    chosen = choose_reaction_layout(path, width, height, duration, samples, scene_cuts)
+    if chosen:
+        return chosen
+    corners = [
+        f for _, faces in samples for f in faces
+        if (f[0] + f[2] / 2 < width * .38 or f[0] + f[2] / 2 > width * .62)
+        and (f[1] + f[3] / 2 < height * .45 or f[1] + f[3] / 2 > height * .58)
+        and f[2] < width * .35
+    ]
+    if corners:
+        face = tuple(float(v) for v in np.median(np.asarray(corners), axis=0))
+        fx, fy, fw, fh = face
+        iw = min(width * .38, max(width * .22, fw * 2.8))
+        ih = min(height * .45, max(height * .28, fh * 3.2))
+        ix = max(0., min(width - iw, fx + fw / 2 - iw / 2))
+        iy = max(0., min(height - ih, fy + fh / 2 - ih * .42))
+        inset: Box = (ix, iy, iw, ih)
+    else:
+        ix, iy, iw, ih = width * .71, height * .02, width * .27, height * .36
+        inset = (ix, iy, iw, ih)
+        face = (ix + iw * .35, iy + ih * .25, iw * .3, ih * .45)
+    return build_reaction_layout(width, height, max(duration, 1.), face, inset, samples, scene_cuts)

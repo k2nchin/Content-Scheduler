@@ -69,6 +69,10 @@
     "original": {
       "label": "Original",
       "hint": "Keep the source aspect ratio"
+    },
+    "vertical_streamer": {
+      "label": "Streamer (cam + game)",
+      "hint": "Rounded facecam on top, gameplay below"
     }
   },
   "captions": "Captions",

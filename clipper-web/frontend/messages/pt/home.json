@@ -69,6 +69,10 @@
     "original": {
       "label": "Original",
       "hint": "Mantém a proporção do vídeo original"
+    },
+    "vertical_streamer": {
+      "label": "Streamer (cam + game)",
+      "hint": "Rounded facecam on top, gameplay below"
     }
   },
   "captions": "Legendas",

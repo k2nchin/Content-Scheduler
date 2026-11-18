@@ -69,6 +69,10 @@
     "original": {
       "label": "原始",
       "hint": "保留源视频比例"
+    },
+    "vertical_streamer": {
+      "label": "Streamer (cam + game)",
+      "hint": "Rounded facecam on top, gameplay below"
     }
   },
   "captions": "字幕",
