@@ -60,7 +60,7 @@ def subir_y_clipear(trozo: Path, ajustes: dict | None = None) -> str | None:
     """Sube el trozo al motor y le pide los clips. Devuelve el id del trabajo."""
     log.info("Subiendo %s (%.1f MB)", trozo.name, trozo.stat().st_size / 1e6)
     with trozo.open("rb") as f:
-        r = requests.post(f"{API}/upload", headers=cabeceras(),
+        r = requests.post(f"{API}/upload", headers={**cabeceras(), **(cabeceras_extra or {})},
                           files={"video": (trozo.name, f, "video/mp4")}, timeout=3600)
     if r.status_code >= 300:
         log.error("No se pudo subir: %s %s", r.status_code, r.text[:200])
@@ -71,7 +71,7 @@ def subir_y_clipear(trozo: Path, ajustes: dict | None = None) -> str | None:
         return None
 
     cuerpo = {"source": {"url": referencia}, **(ajustes or OPCIONES)}
-    r = requests.post(f"{API}/tasks/", headers={**cabeceras(), "Content-Type": "application/json"},
+    r = requests.post(f"{API}/tasks/", headers={**cabeceras(), **(cabeceras_extra or {}), "Content-Type": "application/json"},
                       json=cuerpo, timeout=120)
     if r.status_code >= 300:
         log.error("No se pudo encargar el clipeo: %s %s", r.status_code, r.text[:200])

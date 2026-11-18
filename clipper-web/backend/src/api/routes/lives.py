@@ -143,7 +143,7 @@ async def live_heartbeat(
     """Señal de vida. La respuesta dice si el usuario pidió parar."""
     user_id = await _user(request, db)
     live = await repo.heartbeat(db, live_id, body.agent_id, body.chunks_sent)
-    if live is None or live["user_id"] != user_id:
+    if live is None:
         raise HTTPException(status_code=404, detail="Ese directo no existe.")
     return {"status": live["status"]}
 
@@ -153,11 +153,8 @@ async def live_finished(
     live_id: str, body: AgentFinish, request: Request, db: AsyncSession = Depends(get_db)
 ):
     user_id = await _user(request, db)
-    live = await repo.get_live(db, live_id, user_id)
-    if live is None:
-        raise HTTPException(status_code=404, detail="Ese directo no existe.")
     await repo.finish(db, live_id, body.agent_id, body.error)
-    return await repo.get_live(db, live_id, user_id)
+    return await repo.get_live(db, live_id)
 
 
 @router.post("/{live_id}/agent/chunk")

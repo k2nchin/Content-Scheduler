@@ -157,8 +157,7 @@ async def claim_next(db, user_id: str, agent_id: str) -> dict | None:
                 updated_at = NOW()
             WHERE id = (
                 SELECT id FROM live_sessions
-                WHERE user_id = :user_id
-                  AND (status = 'pedido'
+                WHERE (status = 'pedido'
                        OR (status = 'grabando'
                            AND last_heartbeat < NOW() - INTERVAL '{AGENT_TIMEOUT}'))
                 ORDER BY created_at
