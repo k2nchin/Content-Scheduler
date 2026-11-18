@@ -24,11 +24,11 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// Nunito: la redonda más cercana a SF Rounded, la tipografía de títulos de Content Scheduler.
+// Nunito es fuente variable en Google Fonts; pasarle una lista de weights
+// rompe el cargador de fuentes de Turbopack en Next.js 15.
 const syne = Nunito({
   variable: "--font-syne",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
 });
 
 const dataFastWebsiteId = process.env.NEXT_PUBLIC_DATAFAST_WEBSITE_ID;
