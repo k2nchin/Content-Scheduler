@@ -151,6 +151,12 @@ fi
 # dentro del Mac. Sigue pidiendo la clave de API a cualquiera que llame.
 set_env BACKEND_BIND 0.0.0.0
 set_env WORKFLOWS_ACCESS all
+if [ -z "$(grep '^BACKEND_AUTH_SECRET=' "$ENV_FILE" | cut -d= -f2-)" ]; then
+  set_env BACKEND_AUTH_SECRET "$(openssl rand -hex 32)"
+fi
+if [ -z "$(grep '^APP_SETTINGS_ENCRYPTION_KEY=' "$ENV_FILE" | cut -d= -f2-)" ]; then
+  set_env APP_SETTINGS_ENCRYPTION_KEY "$(openssl rand -base64 32)"
+fi
 chmod 600 "$ENV_FILE"
 ok "Configurado: ${RESUMEN}"
 
