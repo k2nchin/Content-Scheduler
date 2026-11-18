@@ -56,27 +56,29 @@ def cabeceras() -> dict:
     return {"Authorization": f"Bearer {CLAVE}"}
 
 
-def subir_y_clipear(trozo: Path, ajustes: dict | None = None) -> None:
-    """Sube el trozo al motor y le pide los clips."""
+def subir_y_clipear(trozo: Path, ajustes: dict | None = None) -> str | None:
+    """Sube el trozo al motor y le pide los clips. Devuelve el id del trabajo."""
     log.info("Subiendo %s (%.1f MB)", trozo.name, trozo.stat().st_size / 1e6)
     with trozo.open("rb") as f:
         r = requests.post(f"{API}/upload", headers=cabeceras(),
                           files={"video": (trozo.name, f, "video/mp4")}, timeout=3600)
     if r.status_code >= 300:
         log.error("No se pudo subir: %s %s", r.status_code, r.text[:200])
-        return
+        return None
     referencia = (r.json() or {}).get("video_path")
     if not referencia:
         log.error("El motor no devolvió dónde quedó el archivo.")
-        return
+        return None
 
     cuerpo = {"source": {"url": referencia}, **(ajustes or OPCIONES)}
     r = requests.post(f"{API}/tasks/", headers={**cabeceras(), "Content-Type": "application/json"},
                       json=cuerpo, timeout=120)
     if r.status_code >= 300:
         log.error("No se pudo encargar el clipeo: %s %s", r.status_code, r.text[:200])
-        return
-    log.info("Clipeando el trozo: trabajo %s", (r.json() or {}).get("task_id", "?"))
+        return None
+    tid = (r.json() or {}).get("task_id")
+    log.info("Clipeando el trozo: trabajo %s", tid or "?")
+    return tid
 
 
 def grabar(
@@ -85,6 +87,7 @@ def grabar(
     minutos: int = MINUTOS,
     opciones: dict | None = None,
     debe_parar=None,
+    al_crear_trozo=None,
 ) -> int:
     """Graba el directo por trozos y los va mandando. Devuelve cuántos mandó.
 
@@ -124,7 +127,9 @@ def grabar(
             for trozo in trozos[:-1]:
                 if trozo.name not in enviados and trozo.stat().st_size > 1_000_000:
                     enviados.add(trozo.name)
-                    subir_y_clipear(trozo, ajustes)
+                    tid = subir_y_clipear(trozo, ajustes)
+                    if tid and al_crear_trozo:
+                        al_crear_trozo(tid)
             if corte.poll() is not None:
                 break
             if debe_parar is not None and debe_parar(len(enviados)):
@@ -146,7 +151,9 @@ def grabar(
     for trozo in sorted(CARPETA.glob(f"{marca}_*.mp4")):
         if trozo.name not in enviados and trozo.stat().st_size > 1_000_000:
             enviados.add(trozo.name)
-            subir_y_clipear(trozo, ajustes)
+            tid = subir_y_clipear(trozo, ajustes)
+            if tid and al_crear_trozo:
+                al_crear_trozo(tid)
 
     log.info("Listo. Los clips salen en la app y en la web, trozo por trozo.")
     return len(enviados)

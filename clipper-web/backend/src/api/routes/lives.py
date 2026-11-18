@@ -20,6 +20,7 @@ from ...auth_headers import resolve_authenticated_user_id
 from ...config import get_config
 from ...database import get_db
 from ...repositories import live_repository as repo
+from ...repositories.clip_repository import ClipRepository
 from ...stream_source import live_channel_source
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,10 @@ class AgentFinish(AgentCall):
     error: str | None = Field(default=None, max_length=2000)
 
 
+class AgentChunk(AgentCall):
+    task_id: str = Field(min_length=8, max_length=64)
+
+
 @router.post("/agent/claim")
 async def claim_live(body: AgentCall, request: Request, db: AsyncSession = Depends(get_db)):
     """Entrega el siguiente directo que haya que grabar, o nada."""
@@ -153,3 +158,32 @@ async def live_finished(
         raise HTTPException(status_code=404, detail="Ese directo no existe.")
     await repo.finish(db, live_id, body.agent_id, body.error)
     return await repo.get_live(db, live_id, user_id)
+
+
+@router.post("/{live_id}/agent/chunk")
+async def live_chunk(
+    live_id: str, body: AgentChunk, request: Request, db: AsyncSession = Depends(get_db)
+):
+    """El agente avisa de qué tarea clipea cada trozo, para juntar sus clips."""
+    await _user(request, db)
+    await repo.add_chunk_task(db, live_id, body.agent_id, body.task_id)
+    return {"ok": True}
+
+
+@router.get("/{live_id}/clips")
+async def live_clips(live_id: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """Todos los clips de un directo juntos, los más nuevos primero.
+
+    Junta los clips de cada trozo ya clipeado para poder verlos y publicarlos
+    en vivo, sin abrir trabajo por trabajo.
+    """
+    user_id = await _user(request, db)
+    live = await repo.get_live(db, live_id, user_id)
+    if live is None:
+        raise HTTPException(status_code=404, detail="Ese directo no existe.")
+    clips: list[dict] = []
+    for task_id in await repo.task_ids_for(db, live_id, user_id):
+        clips.extend(await ClipRepository.get_clips_by_task(db, task_id))
+    # Lo más reciente arriba: el último trozo es lo que acaba de pasar en el directo.
+    clips.sort(key=lambda c: c.get("created_at") or "", reverse=True)
+    return {"status": live["status"], "clips": clips}

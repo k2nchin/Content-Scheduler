@@ -199,3 +199,42 @@ async def finish(db, live_id: str, agent_id: str, error: str | None = None) -> N
         {"id": live_id, "agent_id": agent_id, "error": error},
     )
     await db.commit()
+
+
+async def add_chunk_task(db, live_id: str, agent_id: str, task_id: str) -> None:
+    """Apunta la tarea de clipeo de un trozo en su directo, sin repetir.
+
+    Así una sola vista puede juntar los clips de todos los trozos mientras el
+    directo sigue grabando, en vez de tener que abrir trabajo por trabajo.
+    """
+    await db.execute(
+        text("""
+            UPDATE live_sessions
+            SET task_ids = CASE
+                    WHEN task_ids @> to_jsonb(:task_id::text) THEN task_ids
+                    ELSE task_ids || to_jsonb(:task_id::text)
+                END,
+                updated_at = NOW()
+            WHERE id = :id AND agent_id = :agent_id
+        """),
+        {"id": live_id, "agent_id": agent_id, "task_id": task_id},
+    )
+    await db.commit()
+
+
+async def task_ids_for(db, live_id: str, user_id: str) -> list[str]:
+    """Las tareas de clipeo de este directo, de la más vieja a la más nueva."""
+    result = await db.execute(
+        text("""
+            SELECT task_ids FROM live_sessions
+            WHERE id = :id AND user_id = :user_id
+        """),
+        {"id": live_id, "user_id": user_id},
+    )
+    row = result.first()
+    if row is None:
+        return []
+    ids = row._mapping["task_ids"]
+    if isinstance(ids, str):
+        ids = json.loads(ids or "[]")
+    return list(ids or [])

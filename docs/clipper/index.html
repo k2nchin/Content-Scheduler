@@ -504,7 +504,7 @@ async function empezar(referencia) {
   $('btnIr').disabled = true;
   try {
     const r = await api('/tasks/', { method: 'POST', body: JSON.stringify(cuerpo) });
-    S.tarea = r.task_id;
+    S.tarea = r.task_id; S.directo = '';
     S.yaMostrado = false; S.mostrados = 0;
     ver('trabajando');
     seguir();
@@ -542,11 +542,13 @@ async function seguir() {
 
 function cancelar() {
   clearTimeout(S.mirando);
-  api('/tasks/' + S.tarea + '/cancel', { method: 'POST' }).catch(() => {});
+  // Un directo no se cancela desde aquí: eso es el botón Parar. Solo se deja de mirar.
+  if (S.tarea) api('/tasks/' + S.tarea + '/cancel', { method: 'POST' }).catch(() => {});
+  S.directo = '';
   ver('crear');
 }
 
-function volver() { S.tarea = ''; S.clips = []; S.marcados.clear(); ver('crear'); }
+function volver() { clearTimeout(S.mirando); S.tarea = ''; S.directo = ''; S.clips = []; S.marcados.clear(); ver('crear'); }
 
 // ───────────────────────── Los clips ─────────────────────────
 function color(v) { return v >= 75 ? 'var(--ok)' : v >= 50 ? 'var(--warn)' : 'var(--muted)'; }
@@ -605,7 +607,7 @@ async function mostrar(clips, parcial = false) {
 
   // Los videos se piden uno a uno para no cargar el motor de golpe.
   for (const c of S.clips) {
-    const src = await fuenteDeVideo(c.id);
+    const src = await fuenteDeVideo(c);
     const el = $('v-' + c.id);
     if (el && src) el.src = src;
   }
@@ -629,10 +631,16 @@ async function juntar() {
 }
 
 async function recargarClips() {
-  try { mostrar((await api('/tasks/' + S.tarea)).clips || []); } catch (e) { aviso(e.message); }
+  try {
+    if (S.directo) { S.mostrados = 0; const r = await api(`/lives/${S.directo}/clips`); mostrar(r.clips || [], true); }
+    else { mostrar((await api('/tasks/' + S.tarea)).clips || []); }
+  } catch (e) { aviso(e.message); }
 }
 
 // ───────────────────────── Estudio ─────────────────────────
+// El clip de un directo es de su propia tarea; lo demás, de la tarea abierta.
+function tareaDe(c) { return (c && c.task_id) ? c.task_id : S.tarea; }
+
 function abrirEstudio(id) {
   const c = S.clips.find(x => x.id === id);
   if (!c) return;
@@ -653,19 +661,19 @@ async function enEstudio(mensaje, fn) {
 }
 
 const recortar = () => enEstudio('Clip recortado', () => api(
-  `/tasks/${S.tarea}/clips/${S.editando.id}`,
+  `/tasks/${tareaDe(S.editando)}/clips/${S.editando.id}`,
   { method: 'PATCH', body: JSON.stringify({ start_offset: +$('cortaA').value, end_offset: +$('cortaB').value }) }));
 
 const partir = () => enEstudio('Partido en dos', () => api(
-  `/tasks/${S.tarea}/clips/${S.editando.id}/split`,
+  `/tasks/${tareaDe(S.editando)}/clips/${S.editando.id}/split`,
   { method: 'POST', body: JSON.stringify({ split_time: +$('parteEn').value }) }));
 
 const guardarSubs = () => enEstudio('Subtítulos guardados', () => api(
-  `/tasks/${S.tarea}/clips/${S.editando.id}/captions`,
+  `/tasks/${tareaDe(S.editando)}/clips/${S.editando.id}/captions`,
   { method: 'PATCH', body: JSON.stringify({ caption_text: $('subTexto').value, position: $('subPos').value }) }));
 
 const borrar = () => { if (confirm('¿Borrar este clip del Mac?'))
-  enEstudio('Clip borrado', () => api(`/tasks/${S.tarea}/clips/${S.editando.id}`, { method: 'DELETE' })); };
+  enEstudio('Clip borrado', () => api(`/tasks/${tareaDe(S.editando)}/clips/${S.editando.id}`, { method: 'DELETE' })); };
 
 function bajar(preset) {
   const base = S.servidor.replace(/\/$/, '');
@@ -735,6 +743,30 @@ async function pararDirecto(id) {
   await cargarDirectos();
 }
 
+// Abre un directo y va enseñando sus clips según cada trozo los corta.
+function verDirecto(id) {
+  S.tarea = '';            // no es un trabajo suelto, es el directo entero
+  S.directo = id;
+  S.yaMostrado = false; S.mostrados = 0;
+  ver('trabajando');
+  $('mensaje').textContent = 'Clips del directo. Van saliendo según graba.';
+  $('barra').style.width = '100%';
+  seguirDirecto();
+}
+
+async function seguirDirecto() {
+  if (!S.directo) return;
+  let r;
+  try { r = await api(`/lives/${S.directo}/clips`); }
+  catch (e) { S.mirando = setTimeout(seguirDirecto, 5000); return; }
+  const clips = r.clips || [];
+  if (clips.length && clips.length !== S.mostrados) { S.mostrados = clips.length; mostrar(clips, r.status !== 'terminado' && r.status !== 'error'); }
+  $('mensaje').textContent = (r.status === 'terminado' || r.status === 'error')
+    ? 'Directo terminado.' : 'Grabando… los clips van saliendo.';
+  if (r.status === 'terminado' || r.status === 'error') { if (!clips.length) { ver('crear'); } return; }
+  S.mirando = setTimeout(seguirDirecto, 5000);
+}
+
 async function cargarDirectos() {
   let lista = [];
   // Un motor viejo no tiene directos; eso no debe romper la página.
@@ -747,6 +779,7 @@ async function cargarDirectos() {
       <span class="dot" style="background:${d.status === 'grabando' ? 'var(--red)' : 'var(--warn)'}"></span>
       <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${d.url}</span>
       <span class="hint" style="margin:0">${ROTULO_DIRECTO[d.status] || d.status}${trozos}</span>
+      <button class="sm" onclick="verDirecto('${d.id}')">Ver clips</button>
       <button class="sm" onclick="pararDirecto('${d.id}')">Parar</button></div>`;
   }).join('');
 }
@@ -767,7 +800,7 @@ async function cargarTrabajos() {
 }
 
 async function abrirTrabajo(id) {
-  S.tarea = id;
+  S.tarea = id; S.directo = '';
   S.yaMostrado = false;
   try {
     const t = await api('/tasks/' + id);

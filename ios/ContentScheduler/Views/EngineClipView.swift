@@ -38,6 +38,10 @@ struct EngineClipView: View {
     @State private var lives: [ClipEngine.Live] = []
     @State private var startingLive = false
     @State private var generando = false   // el iMac sigue cortando más clips
+    @State private var directoID = ""      // si no está vacío, miramos un directo en vivo
+
+    /// De qué tarea es un clip: la suya (en un directo) o la abierta.
+    private func tareaDe(_ c: ClipEngine.Clip) -> String { c.taskID.isEmpty ? taskID : c.taskID }
     @AppStorage("engine.liveMinutes") private var liveMinutes = 10
 
     var body: some View {
@@ -85,7 +89,7 @@ struct EngineClipView: View {
         }
         .sheet(item: $detail) { c in scoreSheet(c) }
         .sheet(item: $editing) { c in
-            EngineStudioView(taskID: taskID, clip: c, onChange: { Task { await refresh() } })
+            EngineStudioView(taskID: c.taskID.isEmpty ? taskID : c.taskID, clip: c, onChange: { Task { await refresh() } })
         }
         .onDisappear { job?.cancel() }
     }
@@ -288,7 +292,7 @@ struct EngineClipView: View {
     private func clipRow(_ clip: ClipEngine.Clip) -> some View {
         Box {
                 HStack(alignment: .top, spacing: 12) {
-                    EnginePreview(taskID: taskID, clip: clip)
+                    EnginePreview(taskID: tareaDe(clip), clip: clip)
                         .frame(width: 104)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .top, spacing: 7) {
@@ -348,12 +352,14 @@ struct EngineClipView: View {
                             Text(d.rotulo).font(.caption2).foregroundStyle(Theme.muted)
                         }
                         Spacer(minLength: 0)
+                        Button("Ver clips") { verDirecto(d) }
+                            .font(.caption.bold()).foregroundStyle(Theme.accent)
                         Button("Parar") { stopLive(d) }
                             .font(.caption.bold()).foregroundStyle(Theme.accent)
                             .disabled(d.status == "parando")
                     }
                 }
-                Text("Cada trozo grabado aparece arriba como un trabajo más.")
+                Text("«Ver clips» te enseña los del directo según van saliendo.")
                     .font(.caption2).foregroundStyle(Theme.muted)
             }
         }
@@ -435,6 +441,32 @@ struct EngineClipView: View {
                     startingLive = false
                     store.show(error.localizedDescription)
                 }
+            }
+        }
+    }
+
+    /// Abre un directo y va trayendo sus clips según cada trozo los corta.
+    private func verDirecto(_ d: ClipEngine.Live) {
+        job?.cancel()
+        directoID = d.id
+        taskID = ""
+        clips = []
+        chosen = []
+        working = false
+        generando = true
+        job = Task {
+            while !Task.isCancelled {
+                do {
+                    let r = try await ClipEngine.liveClips(d.id)
+                    await MainActor.run {
+                        if !r.clips.isEmpty { clips = r.clips }
+                        generando = (r.status != "terminado" && r.status != "error")
+                    }
+                    if r.status == "terminado" || r.status == "error" { break }
+                } catch {
+                    // Un corte no tira la vista: se vuelve a preguntar.
+                }
+                try? await Task.sleep(for: .seconds(5))
             }
         }
     }
@@ -555,6 +587,7 @@ struct EngineClipView: View {
         }
         working = true
         generando = false
+        directoID = ""
         clips = []
         progress = -1
         status = "Mandándole el video a tu iMac…"
@@ -666,7 +699,7 @@ struct EngineClipView: View {
             for (i, clip) in picked.enumerated() {
                 await MainActor.run { status = "Bajando \(i + 1) de \(picked.count)…" }
                 do {
-                    let file = try await ClipEngine.download(task: taskID, clip: clip)
+                    let file = try await ClipEngine.download(task: tareaDe(clip), clip: clip)
                     let id = await store.addVideo(from: file, youtubeConnected: connected)
                     await MainActor.run {
                         store.update(id) { post in

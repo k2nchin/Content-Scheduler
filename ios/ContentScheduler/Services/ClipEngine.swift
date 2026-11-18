@@ -56,6 +56,9 @@ enum ClipEngine {
         let shareable: Int
         /// En una serie: «Parte 2 de 5». Vacío en los demás modos.
         let partNumber: Int
+        /// De qué tarea salió. En un directo cada clip es de un trozo distinto;
+        /// vacío cuando se mira un trabajo suelto (se usa la tarea abierta).
+        var taskID: String = ""
     }
 
     /// Un modo de corte de los que sabe hacer el motor.
@@ -282,7 +285,8 @@ enum ClipEngine {
             engagement: Int(number(c["engagement_score"]).rounded()),
             value: Int(number(c["value_score"]).rounded()),
             shareable: Int(number(c["shareability_score"]).rounded()),
-            partNumber: Int(number(c["part_number"]).rounded())
+            partNumber: Int(number(c["part_number"]).rounded()),
+            taskID: (c["task_id"] as? String) ?? ""
         )
     }
 
@@ -461,6 +465,14 @@ enum ClipEngine {
     /// Pide parar. El trozo que estaba a medias se manda igual antes de cerrar.
     static func stopLive(_ id: String) async throws -> Live? {
         parseLive(try await json(try request("/lives/\(id)/stop", method: "POST")))
+    }
+
+    /// Los clips de un directo, juntos, los más nuevos primero. El estado dice
+    /// si sigue grabando, para seguir pidiendo o parar.
+    static func liveClips(_ id: String) async throws -> (status: String, clips: [Clip]) {
+        let obj = try await json(try request("/lives/\(id)/clips"))
+        let lista = (obj["clips"] as? [[String: Any]]) ?? []
+        return ((obj["status"] as? String) ?? "grabando", lista.compactMap(parseClip))
     }
 
     /// Los modos de corte que este motor permite. Si falla, al menos están los highlights.

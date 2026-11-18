@@ -78,6 +78,14 @@ def grabar_directo(live: dict) -> None:
             log.warning("No pude avisar de que sigo vivo: %s", e)
         return parar
 
+    def reportar_trozo(task_id: str) -> None:
+        # Enlaza el trozo con el directo, para que su clip salga en la vista en vivo.
+        try:
+            requests.post(f"{API}/lives/{live_id}/agent/chunk", headers=CABECERAS,
+                          json={"agent_id": AGENTE, "task_id": task_id}, timeout=30)
+        except requests.RequestException as e:
+            log.warning("No pude enlazar el trozo %s: %s", task_id, e)
+
     fallo = None
     try:
         grabar.grabar(
@@ -85,6 +93,7 @@ def grabar_directo(live: dict) -> None:
             minutos=int(live.get("chunk_minutes") or 10),
             opciones=live.get("options") or {},
             debe_parar=debe_parar,
+            al_crear_trozo=reportar_trozo,
         )
     except Exception as e:  # el agente nunca se muere por un directo
         fallo = f"{type(e).__name__}: {e}"[:2000]

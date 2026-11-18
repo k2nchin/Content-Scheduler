@@ -421,6 +421,8 @@ CREATE TABLE IF NOT EXISTS live_sessions (
     options JSONB NOT NULL DEFAULT '{}'::jsonb,
     chunk_minutes INTEGER NOT NULL DEFAULT 10,
     chunks_sent INTEGER NOT NULL DEFAULT 0,
+    -- Las tareas de clipeo de cada trozo, para juntar sus clips en una vista.
+    task_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     error_message TEXT,
     -- Quién lo está grabando y cuándo dio señales de vida por última vez: sin
     -- esto un agente muerto dejaría el directo "grabando" para siempre.

@@ -257,6 +257,7 @@ class ClipRepository:
                     "reasoning": row.reasoning,
                     "clip_order": row.clip_order,
                     "created_at": row.created_at.isoformat(),
+                    "task_id": task_id,
                     "video_url": f"/tasks/{task_id}/clips/{row.id}/file",
                     "virality_score": getattr(row, "virality_score", 0) or 0,
                     "hook_score": getattr(row, "hook_score", 0) or 0,
