@@ -31,6 +31,11 @@ Variables (todas opcionales):
     FACTOR_PICO          cuántas veces más rápido que lo normal tiene que ir el chat (3)
     MIN_MENSAJES_SEG     ritmo mínimo para contar como pico (1.0 mensajes/s)
     VERTICAL             0 para sacar solo el clip horizontal (aún más rápido)
+    CAMARA               dónde está la cámara del streamer en el directo:
+                         auto (la busca por la cara; si no, hace 9:16 normal) |
+                         arriba-derecha | arriba-izquierda | abajo-derecha |
+                         abajo-izquierda | x,y,ancho,alto (en %: ej. 72,3,26,34) |
+                         no (sin recuadro arriba: solo 9:16 normal)
     ALTURA_MAXIMA        calidad que se baja del directo (720)
 """
 
@@ -61,6 +66,7 @@ ESPERA_CLIPS = int(os.getenv("ESPERA_ENTRE_CLIPS", "40"))
 FACTOR = float(os.getenv("FACTOR_PICO", "3"))
 MINIMO = float(os.getenv("MIN_MENSAJES_SEG", "1.0"))
 VERTICAL = os.getenv("VERTICAL", "1") != "0"
+CAMARA = os.getenv("CAMARA", "auto").strip().lower()
 ALTURA = os.getenv("ALTURA_MAXIMA", "720")
 YT_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
 SALIDA = Path(os.getenv("CARPETA_CLIPS", str(Path.home() / "Desktop" / "Clips exprés"))).expanduser()
@@ -154,6 +160,104 @@ def ffmpeg(*args: str) -> bool:
     return subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args]).returncode == 0
 
 
+# Esquinas típicas de la cámara en OBS (en % del video: x, y, ancho, alto).
+ESQUINAS_CAM = {
+    "arriba-derecha": (0.71, 0.03, 0.27, 0.36),
+    "arriba-izquierda": (0.02, 0.03, 0.27, 0.36),
+    "abajo-derecha": (0.71, 0.61, 0.27, 0.36),
+    "abajo-izquierda": (0.02, 0.61, 0.27, 0.36),
+}
+
+
+def detectar_camara_cara(video: Path) -> tuple[float, float, float, float] | None:
+    """Busca una cara fija en una esquina con OpenCV (si está instalado)."""
+    try:
+        import cv2  # type: ignore
+    except ImportError:
+        return None
+    cap = cv2.VideoCapture(str(video))
+    if not cap.isOpened():
+        return None
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    if not (w and h and total):
+        cap.release()
+        return None
+    det = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    esquinas = []
+    for f in (0.15, 0.35, 0.55, 0.75, 0.9):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(total * f))
+        ok, frame = cap.read()
+        if not ok:
+            continue
+        chico = cv2.resize(frame, (640, 360))
+        caras = det.detectMultiScale(cv2.cvtColor(chico, cv2.COLOR_BGR2GRAY), 1.15, 4, minSize=(22, 22))
+        for (x, y, fw, fh) in caras:
+            cx, cy = (x + fw / 2) / 640, (y + fh / 2) / 360
+            # Una webcam de streamer vive pegada a una esquina, no en el centro.
+            if (cx < 0.35 or cx > 0.65) and (cy < 0.42 or cy > 0.58) and fw / 640 < 0.28:
+                esquinas.append((cx, cy, fw / 640, fh / 360))
+    cap.release()
+    if len(esquinas) < 2:
+        return None
+    esquinas.sort()
+    cx, cy, fw, fh = esquinas[len(esquinas) // 2]
+    # De la cara al recuadro de la cámara: cabeza, hombros y un poco de fondo.
+    cw = min(0.38, max(0.22, fw * 2.8))
+    ch = min(0.45, max(0.28, fh * 3.2))
+    x = max(0.0, min(1.0 - cw, cx - cw / 2))
+    y = max(0.0, min(1.0 - ch, cy - ch * 0.42))
+    return (x, y, cw, ch)
+
+
+def caja_camara(video: Path) -> tuple[float, float, float, float] | None:
+    if CAMARA in ("no", "0", "false", "centro"):
+        return None
+    if CAMARA in ESQUINAS_CAM:
+        return ESQUINAS_CAM[CAMARA]
+    if "," in CAMARA:
+        try:
+            x, y, w, h = [float(v) / 100 for v in CAMARA.split(",")]
+            if 0 <= x < 1 and 0 <= y < 1 and 0 < w <= 1 and 0 < h <= 1:
+                return (x, y, w, h)
+        except ValueError:
+            pass
+    return detectar_camara_cara(video)
+
+
+def filtro_vertical(video: Path) -> str:
+    """Si hay cámara en una esquina: fondo difuminado + juego grande abajo +
+    cámara del streamer arriba con esquinas redondeadas (estilo TikTok/Kick).
+    Si no: recorte 9:16 centrado."""
+    cam = caja_camara(video)
+    if not cam:
+        return "crop=ih*9/16:ih,scale=1080:1920"
+    x, y, w, h = cam
+    r = 38  # radio de las esquinas redondeadas de la cámara
+    redondeo = (
+        f"if(lt(X,{r})*lt(Y,{r}),if(lte(hypot({r}-X,{r}-Y),{r}),255,0),"
+        f"if(gt(X,W-{r})*lt(Y,{r}),if(lte(hypot(X-(W-{r}),{r}-Y),{r}),255,0),"
+        f"if(lt(X,{r})*gt(Y,H-{r}),if(lte(hypot({r}-X,Y-(H-{r})),{r}),255,0),"
+        f"if(gt(X,W-{r})*gt(Y,H-{r}),if(lte(hypot(X-(W-{r}),Y-(H-{r})),{r}),255,0),255))))"
+    )
+    return (
+        f"[0:v]crop=iw*{w:.4f}:ih*{h:.4f}:iw*{x:.4f}:ih*{y:.4f},split=2[bg][cam];"
+        # Fondo de arriba y abajo: la propia cámara del streamer difuminada.
+        "[bg]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,"
+        "boxblur=22:3,scale=1080:1920[bg2];"
+        # El juego grande abajo, un poco desplazado al lado contrario de la webcam
+        # para que la cámara no salga repetida en una esquina.
+        f"[0:v]crop=ih*1080/1150:ih:iw*{0.18 if x > 0.5 else 0.82:.2f}-(ih*1080/1150)/2:0,"
+        "scale=1080:1150[game2];"
+        # La cámara del streamer arriba, con esquinas redondeadas.
+        "[cam]scale=560:580:force_original_aspect_ratio=increase,crop=560:580,format=yuva420p,"
+        f"geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='{redondeo}'[cam2];"
+        "[bg2][game2]overlay=0:650[tmp];"
+        "[tmp][cam2]overlay=(W-w)/2:155,format=yuv420p"
+    )
+
+
 def cortar(g: Grabador, canal: str, motivo: str) -> None:
     inicio = time.monotonic()
     trozos = g.ultimos(DURACION)
@@ -187,7 +291,7 @@ def cortar(g: Grabador, canal: str, motivo: str) -> None:
     if VERTICAL:
         t = time.monotonic()
         vertical = destino / f"{marca}_{canal}_9x16.mp4"
-        ok = ffmpeg("-i", str(horizontal), "-vf", "crop=ih*9/16:ih,scale=1080:1920",
+        ok = ffmpeg("-i", str(horizontal), "-filter_complex", filtro_vertical(horizontal),
                     *CODIFICADOR, "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(vertical))
         log(canal, f"📱 9:16 en {time.monotonic() - t:.1f} s → {vertical.name}" if ok else "No se pudo hacer el 9:16.")
 
