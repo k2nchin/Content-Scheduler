@@ -837,7 +837,7 @@ export default function HomeApp() {
       });
       window.location.href = taskPathFromCreate(startResult);
     } catch (error) {
-      console.error("Error processing video:", error);
+      console.warn("Error processing video:", error);
       setError(error instanceof Error ? error.message : t("errors.processVideo"));
       setIsLoading(false);
       setStatusMessage("");
