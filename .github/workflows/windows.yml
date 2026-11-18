@@ -1,0 +1,51 @@
+name: App de Windows (.exe portable)
+
+on:
+  push:
+    paths: ["clipper-web/escritorio/windows/**", "clipper-web/escritorio/index.html", ".github/workflows/windows.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  construir:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: clipper-web/escritorio/windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Meter la página dentro de la app
+        shell: bash
+        run: |
+          mkdir -p web
+          cp ../index.html ../icon.svg ../icono-512.png web/
+
+      - name: Instalar y construir
+        run: |
+          npm install --no-audit --no-fund
+          npm run dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ContentScheduler-windows
+          path: clipper-web/escritorio/windows/dist/ContentScheduler-portable.exe
+          if-no-files-found: error
+
+      - name: Publicar en Releases
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete windows-latest -y --cleanup-tag || true
+          gh release create windows-latest dist/ContentScheduler-portable.exe \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "Content Scheduler para Windows" \
+            --notes "Portable: se ejecuta sin instalar. Sin firmar, así que Windows pedirá confirmación la primera vez (Más información → Ejecutar de todas formas)."

@@ -1,0 +1,23 @@
+{
+  "name": "content-scheduler-clipper",
+  "productName": "Content Scheduler",
+  "version": "1.0.0",
+  "description": "Corta clips de tus videos largos con tu propio motor.",
+  "license": "AGPL-3.0-only",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable --publish never"
+  },
+  "devDependencies": {
+    "electron": "33.2.0",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.contentscheduler.clipper",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "web/**"],
+    "win": { "target": "portable", "icon": "icono.ico" },
+    "portable": { "artifactName": "ContentScheduler-portable.exe" }
+  }
+}
