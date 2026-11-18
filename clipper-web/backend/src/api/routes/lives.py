@@ -65,13 +65,18 @@ def _check_source(url: str) -> str:
 async def start_live(body: CreateLive, request: Request, db: AsyncSession = Depends(get_db)):
     """Anota un directo para que el Mac lo grabe y lo vaya clipeando."""
     user_id = await _user(request, db)
-    _check_source(body.url.strip())
+    url = body.url.strip()
+    _check_source(url)
+    # Dos toques al botón no abren dos grabaciones del mismo canal.
+    ya = await repo.active_for_url(db, user_id, url)
+    if ya is not None:
+        return ya
     if await repo.count_active(db, user_id) >= MAX_ACTIVE_LIVES:
         raise HTTPException(
             status_code=409,
             detail=f"Ya hay {MAX_ACTIVE_LIVES} directos en marcha. Para uno antes de empezar otro.",
         )
-    live = await repo.create_live(db, user_id, body.url.strip(), body.options, body.chunk_minutes)
+    live = await repo.create_live(db, user_id, url, body.options, body.chunk_minutes)
     logger.info("Live %s requested by %s", live["id"], user_id)
     return live
 

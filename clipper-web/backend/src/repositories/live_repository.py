@@ -73,6 +73,24 @@ async def list_lives(db, user_id: str, limit: int = 20) -> list[dict]:
     return [_row(row) for row in result.fetchall()]
 
 
+async def active_for_url(db, user_id: str, url: str) -> dict | None:
+    """El directo de esta misma URL que ya esté en marcha, si lo hay.
+
+    Dos toques seguidos al botón, o un reintento, no deben abrir dos
+    grabaciones del mismo canal: una sola basta y la otra solo gastaría al Mac.
+    """
+    result = await db.execute(
+        text(f"""
+            SELECT {_FIELDS} FROM live_sessions
+            WHERE user_id = :user_id AND url = :url
+              AND status IN ('pedido', 'grabando', 'parando')
+            ORDER BY created_at DESC LIMIT 1
+        """),
+        {"user_id": user_id, "url": url},
+    )
+    return _row(result.first())
+
+
 async def count_active(db, user_id: str) -> int:
     """Directos que ocupan al agente ahora mismo."""
     result = await db.execute(
@@ -86,14 +104,35 @@ async def count_active(db, user_id: str) -> int:
 
 
 async def request_stop(db, live_id: str, user_id: str) -> dict | None:
-    """Pide parar. Un directo que aún no ha cogido nadie se cierra en el acto."""
+    """Pide parar, y al segundo toque (o si el agente ya no responde) cierra a la fuerza.
+
+    Un directo pasa a ``parando`` y espera a que el agente cierre el último
+    trozo. Si el agente murió, nadie lo remataría y se quedaría clavado ahí; y
+    volver a darle a Parar debe sacarlo igual. Así que: ``pedido`` se cierra en
+    el acto, ``grabando`` pasa a ``parando`` para un cierre limpio, y un
+    ``parando`` cuyo agente lleva sin dar señales más de ``{timeout}`` (o un
+    segundo toque sobre él) se da por ``terminado`` sin esperar más.
+    """
     await db.execute(
-        text("""
+        text(f"""
             UPDATE live_sessions
-            SET status = CASE WHEN status = 'pedido' THEN 'terminado' ELSE 'parando' END,
-                finished_at = CASE WHEN status = 'pedido' THEN NOW() ELSE finished_at END,
+            SET status = CASE
+                    WHEN status = 'grabando'
+                         AND last_heartbeat IS NOT NULL
+                         AND last_heartbeat > NOW() - INTERVAL '{AGENT_TIMEOUT}'
+                    THEN 'parando'
+                    ELSE 'terminado'
+                END,
+                finished_at = CASE
+                    WHEN status = 'grabando'
+                         AND last_heartbeat IS NOT NULL
+                         AND last_heartbeat > NOW() - INTERVAL '{AGENT_TIMEOUT}'
+                    THEN finished_at
+                    ELSE NOW()
+                END,
                 updated_at = NOW()
-            WHERE id = :id AND user_id = :user_id AND status IN ('pedido', 'grabando')
+            WHERE id = :id AND user_id = :user_id
+              AND status IN ('pedido', 'grabando', 'parando')
         """),
         {"id": live_id, "user_id": user_id},
     )
