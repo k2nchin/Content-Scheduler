@@ -132,10 +132,12 @@
   <div class="card">
     <h2>Link del video</h2>
     <div class="row">
-      <div class="grow"><input id="link" placeholder="youtube.com/watch?v=…   ·   twitch.tv/videos/…" autocomplete="off"></div>
+      <div class="grow"><input id="link" placeholder="youtube.com/watch?v=…   ·   twitch.tv/canal   ·   kick.com/canal" autocomplete="off"></div>
       <button class="p" id="btnIr" onclick="empezar()">Clipear</button>
+      <button id="btnDirecto" onclick="empezarDirecto()">Es un directo</button>
     </div>
-    <p class="hint">Videos ya subidos. Los directos no, porque hace falta el video entero para elegir los momentos.</p>
+    <p class="hint">Un video terminado se corta entero de una vez. Un directo no ha acabado,
+       así que el iMac lo graba por trozos y cada trozo sale solo, sin esperar al final.</p>
   </div>
 
   <div class="card" id="zona">
@@ -222,6 +224,13 @@
   </div>
   <div class="clips" id="lista"></div>
 </section>
+
+<!-- ───────────────────────── Directos ───────────────────────── -->
+<div class="card hide" id="cardDirectos">
+  <h2>Directos en marcha</h2>
+  <div class="jobs" id="directos"></div>
+  <p class="hint">Cada trozo grabado aparece abajo como un trabajo más.</p>
+</div>
 
 <!-- ───────────────────────── Trabajos ───────────────────────── -->
 <div class="card">
@@ -350,7 +359,7 @@ async function comprobar() {
     await api('/tasks/');
     $('estado').textContent = 'motor conectado';
     $('estado').style.color = 'var(--ok)';
-    await Promise.all([cargarModos(), cargarTrabajos()]);
+    await Promise.all([cargarModos(), cargarTrabajos(), cargarDirectos()]);
     return true;
   } catch (e) {
     $('estado').textContent = 'sin conexión';
@@ -660,6 +669,64 @@ function nombreTrabajo(x) {
   const bruto = x.source_title || x.source_url || x.url || '';
   if (!bruto) return 'Video';
   return String(bruto).replace(/^https?:\/\//, '').slice(0, 70).replace(/</g, '&lt;');
+}
+
+// ───────────────────────── Directos ─────────────────────────
+
+const ROTULO_DIRECTO = {
+  pedido: 'Esperando al iMac',
+  grabando: 'Grabando',
+  parando: 'Cerrando el último trozo',
+  terminado: 'Terminado',
+  error: 'Falló',
+};
+
+// El iMac graba; esta página solo deja el encargo. Se puede cerrar al momento.
+async function empezarDirecto() {
+  const link = $('link').value.trim();
+  if (!link) return aviso('Pega el link del canal en directo.');
+  try {
+    await api('/lives/', {
+      method: 'POST',
+      body: JSON.stringify({
+        url: link,
+        chunk_minutes: 10,
+        options: {
+          add_subtitles: $('subs').checked,
+          output_format: $('formato').value,
+          processing_mode: $('calidad').value,
+          clip_length: $('duracion').value,
+          caption_template: $('plantilla').value,
+          include_broll: $('broll').checked,
+        },
+      }),
+    });
+    $('link').value = '';
+    aviso('El iMac está grabando el directo. Los clips van saliendo solos.');
+    await cargarDirectos();
+  } catch (e) { aviso(e.message); }
+}
+
+async function pararDirecto(id) {
+  try { await api(`/lives/${id}/stop`, { method: 'POST' }); } catch (e) { return aviso(e.message); }
+  aviso('Parando. El trozo a medias se clipea igual.');
+  await cargarDirectos();
+}
+
+async function cargarDirectos() {
+  let lista = [];
+  // Un motor viejo no tiene directos; eso no debe romper la página.
+  try { lista = (await api('/lives/')).lives || []; } catch { return; }
+  const vivos = lista.filter(d => ['pedido', 'grabando', 'parando'].includes(d.status));
+  $('cardDirectos').classList.toggle('hide', vivos.length === 0);
+  $('directos').innerHTML = vivos.map(d => {
+    const trozos = d.chunks_sent ? ` · ${d.chunks_sent} trozos clipeados` : '';
+    return `<div class="job">
+      <span class="dot" style="background:${d.status === 'grabando' ? 'var(--red)' : 'var(--warn)'}"></span>
+      <span style="flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${d.url}</span>
+      <span class="hint" style="margin:0">${ROTULO_DIRECTO[d.status] || d.status}${trozos}</span>
+      <button class="sm" onclick="pararDirecto('${d.id}')">Parar</button></div>`;
+  }).join('');
 }
 
 async function cargarTrabajos() {
