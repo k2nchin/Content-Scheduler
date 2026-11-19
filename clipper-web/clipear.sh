@@ -24,20 +24,13 @@ fi
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 mkdir -p "$HOME/.local/bin"
 
-if ! command -v ffmpeg >/dev/null 2>&1; then
-  echo "Bajando ffmpeg precompilado para Mac (5 segundos, sin compilar con Homebrew)…"
-  curl -fL "https://evermeet.cx/ffmpeg/getrelease/zip" -o /tmp/ffmpeg.zip
-  unzip -qo /tmp/ffmpeg.zip -d "$HOME/.local/bin"
-  rm -f /tmp/ffmpeg.zip
-  chmod +x "$HOME/.local/bin/ffmpeg"
-  xattr -dr com.apple.quarantine "$HOME/.local/bin/ffmpeg" 2>/dev/null || true
-fi
-
-if ! command -v yt-dlp >/dev/null 2>&1; then
-  echo "Bajando yt-dlp precompilado para Mac (3 segundos)…"
-  curl -fL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" -o "$HOME/.local/bin/yt-dlp"
-  chmod +x "$HOME/.local/bin/yt-dlp"
-  xattr -dr com.apple.quarantine "$HOME/.local/bin/yt-dlp" 2>/dev/null || true
+if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v yt-dlp >/dev/null 2>&1; then
+  echo "Instalando ffmpeg y yt-dlp precompilados para Mac con pip (5 segundos, sin Homebrew)…"
+  [ -d "$HOME/.local/clipear-venv" ] || python3 -m venv "$HOME/.local/clipear-venv"
+  "$HOME/.local/clipear-venv/bin/pip" install -q --upgrade imageio-ffmpeg yt-dlp
+  FF_BIN="$("$HOME/.local/clipear-venv/bin/python" -c 'import imageio_ffmpeg;print(imageio_ffmpeg.get_ffmpeg_exe())')"
+  ln -sf "$FF_BIN" "$HOME/.local/bin/ffmpeg"
+  ln -sf "$HOME/.local/clipear-venv/bin/yt-dlp" "$HOME/.local/bin/yt-dlp"
 fi
 
 if [ ! -f drive/credenciales/usuario.json ]; then
