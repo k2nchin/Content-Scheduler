@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -84,17 +85,18 @@ class Recogida(http.server.BaseHTTPRequestHandler):
 
 
 def instalar_receptor_esquema(scheme: str, puerto: int) -> Path | None:
-    """En macOS registra una mini-app temporal que captura el redirect del
-    Client ID de iOS (com.googleusercontent.apps...:/oauth2redirect) y se lo
-    pasa a http://localhost:PUERTO sin que tengas que copiar nada."""
     if sys.platform != "darwin" or not shutil.which("swiftc"):
         return None
-    app_dir = Path(tempfile.mkdtemp(prefix="cs-oauth-")) / "CSAuth.app" / "Contents"
+    base_dir = Path.home() / "Applications" / ".cs-oauth-helper"
+    shutil.rmtree(base_dir, ignore_errors=True)
+    app_dir = base_dir / "CSAuth.app" / "Contents"
     (app_dir / "MacOS").mkdir(parents=True)
     (app_dir / "Info.plist").write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>com.contentscheduler.oauthhelper</string>
+  <key>CFBundleName</key><string>ContentSchedulerAuth</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>helper</string>
   <key>LSUIElement</key><true/>
   <key>CFBundleURLTypes</key><array><dict>
@@ -102,17 +104,32 @@ def instalar_receptor_esquema(scheme: str, puerto: int) -> Path | None:
     <key>CFBundleURLSchemes</key><array><string>{scheme}</string></array>
   </dict></array>
 </dict></plist>""")
-    swift_src = app_dir.parent.parent / "helper.swift"
+    swift_src = base_dir / "helper.swift"
     swift_src.write_text(f"""import AppKit
 class D: NSObject, NSApplicationDelegate {{
-    func application(_ application: NSApplication, open urls: [URL]) {{
-        if let u = urls.first, let q = u.query {{
-            let t = URL(string: "http://localhost:{puerto}/?" + q)!
+    func send(_ u: URL) {{
+        let q = u.query ?? ""
+        if let t = URL(string: "http://127.0.0.1:{puerto}/?" + q) {{
             let sem = DispatchSemaphore(value: 0)
             URLSession.shared.dataTask(with: t) {{ _,_,_ in sem.signal() }}.resume()
             _ = sem.wait(timeout: .now() + 5)
         }}
         NSApp.terminate(nil)
+    }}
+    func applicationWillFinishLaunching(_ n: Notification) {{
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL)
+        )
+    }}
+    @objc func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent: NSAppleEventDescriptor) {{
+        if let s = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
+           let u = URL(string: s) {{ send(u) }}
+    }}
+    func application(_ application: NSApplication, open urls: [URL]) {{
+        if let u = urls.first {{ send(u) }}
     }}
 }}
 let app = NSApplication.shared
@@ -123,9 +140,10 @@ app.run()
     r = subprocess.run(["swiftc", str(swift_src), "-o", str(app_dir / "MacOS" / "helper")], capture_output=True)
     if r.returncode != 0:
         return None
+    subprocess.run(["codesign", "--force", "--deep", "-s", "-", str(app_dir.parent)], capture_output=True)
     lsreg = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
     subprocess.run([lsreg, "-f", str(app_dir.parent)], capture_output=True)
-    return app_dir.parent.parent
+    return base_dir
 
 
 def autorizar_uno(permiso: str, salida: Path, etiqueta: str) -> int:
@@ -159,23 +177,40 @@ def autorizar_uno(permiso: str, salida: Path, etiqueta: str) -> int:
         "state": Recogida.estado,
     })
 
-    servidor = http.server.HTTPServer(("localhost", PUERTO), Recogida)
-    servidor.timeout = 180
-    hilo = threading.Thread(target=servidor.handle_request, daemon=True)
+    servidor = http.server.HTTPServer(("127.0.0.1", PUERTO), Recogida)
+    servidor.timeout = 1
+    parar_srv = threading.Event()
+
+    def escuchar():
+        while not parar_srv.is_set() and not Recogida.codigo:
+            servidor.handle_request()
+
+    hilo = threading.Thread(target=escuchar, daemon=True)
     hilo.start()
 
-    print(f"\nAbriendo Google para autorizar {etiqueta}: entra con tu cuenta y dale a Permitir.\n")
+    def leer_consola():
+        try:
+            linea = sys.stdin.readline().strip()
+            if linea and not Recogida.codigo:
+                m = re.search(r"[?&]code=([^&\s]+)", linea)
+                Recogida.codigo = urllib.parse.unquote(m.group(1)) if m else linea
+        except Exception:
+            pass
+
+    threading.Thread(target=leer_consola, daemon=True).start()
+
+    print(f"\nAbriendo Google para autorizar {etiqueta}:")
+    print("  1. Entra con tu cuenta y dale a «Permitir» (si el navegador pregunta «¿Abrir ContentSchedulerAuth?», dile que Sí).")
+    print("  2. (Opcional) Si el navegador no vuelve solo, abre F12 → Red/Network o copia el enlace com.googleusercontent... y pégalo aquí + Enter.\n")
     webbrowser.open(url)
-    hilo.join(timeout=185)
+    for _ in range(180):
+        if Recogida.codigo:
+            break
+        time.sleep(1)
+    parar_srv.set()
     servidor.server_close()
     if tmp_app:
         shutil.rmtree(tmp_app, ignore_errors=True)
-
-    if not Recogida.codigo:
-        print("No llegó la respuesta automática. Si el navegador intentó abrir una dirección, pégala aquí:")
-        linea = input("> ").strip()
-        m = re.search(r"[?&]code=([^&]+)", linea)
-        Recogida.codigo = urllib.parse.unquote(m.group(1)) if m else linea
     if not Recogida.codigo:
         print("Cancelado.")
         return 1
