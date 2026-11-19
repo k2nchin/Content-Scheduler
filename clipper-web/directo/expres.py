@@ -837,6 +837,8 @@ class Web(http.server.BaseHTTPRequestHandler):
         if self.path.startswith("/api/canal"):
             u = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("url", [""])[0].strip()
             if u.startswith(("http://", "https://")) and nombre_de(u) not in manuales:
+                with CANALES_TXT.open("a", encoding="utf-8") as f:
+                    f.write(u + "\n")
                 threading.Thread(target=vigilar_canal, args=(u,), name=nombre_de(u), daemon=True).start()
             self.send_response(204)
             self.end_headers()

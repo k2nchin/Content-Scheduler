@@ -4,10 +4,22 @@
 # (carpeta "Content Scheduler/<canal>") y borra todo el material grabado del iMac.
 #
 #   ./clipear.sh https://kick.com/rdjavi https://twitch.tv/otrocanal
-#   ./clipear.sh                 # usa los canales de directo/canales.txt
+#   ./clipear.sh --servicio https://kick.com/rdjavi   # queda activo 24/7 en el Mac (LaunchAgent + caffeinate)
+#   ./clipear.sh --parar                              # apaga el servicio 24/7
 set -euo pipefail
 
 cd "$(dirname "$0")"
+RAIZ="$(pwd)"
+ETIQUETA="com.contentscheduler.clipear"
+PLIST="$HOME/Library/LaunchAgents/$ETIQUETA.plist"
+LOG="$HOME/Library/Logs/clipear.log"
+
+if [ "${1:-}" = "--parar" ]; then
+  launchctl bootout "gui/$(id -u)/$ETIQUETA" 2>/dev/null || true
+  rm -f "$PLIST"
+  echo "✓ Servicio 24/7 detenido."
+  exit 0
+fi
 
 for prog in ffmpeg yt-dlp; do
   if ! command -v "$prog" >/dev/null 2>&1; then
@@ -21,8 +33,51 @@ if [ ! -f drive/credenciales/usuario.json ]; then
   python3 drive/autorizar.py
 fi
 
+if [ "${1:-}" = "--servicio" ]; then
+  shift
+  if [ "$#" -gt 0 ]; then
+    printf '%s\n' "$@" > directo/canales.txt
+  fi
+  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+  cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>$ETIQUETA</string>
+  <key>WorkingDirectory</key><string>$RAIZ</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>CAMARA</key><string>${CAMARA:-arriba-derecha}</string>
+    <key>DRIVE_SUBIR</key><string>true</string>
+    <key>DRIVE_BORRAR_LOCAL</key><string>true</string>
+  </dict>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-dimsu</string>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>$RAIZ/directo/expres.py</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$LOG</string>
+  <key>StandardErrorPath</key><string>$LOG</string>
+</dict></plist>
+EOF
+  launchctl bootout "gui/$(id -u)/$ETIQUETA" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$PLIST"
+  echo "✓ Servidor de clipping activo 24/7 en segundo plano (aunque cierres la Terminal)."
+  echo "  • El iMac no se dormirá mientras esté activo (caffeinate)."
+  echo "  • Si se cae o reinicias el Mac, arranca solo."
+  echo "  • Panel local:  http://localhost:8090"
+  echo "  • Ver registro: tail -f $LOG"
+  echo "  • Pararlo:      ./clipear.sh --parar"
+  exit 0
+fi
+
 export CAMARA="${CAMARA:-arriba-derecha}"
 export DRIVE_SUBIR=true
 export DRIVE_BORRAR_LOCAL=true
 
-exec python3 directo/expres.py "$@"
+# caffeinate evita que el iMac se duerma mientras vigila y clipea
+exec caffeinate -dimsu python3 directo/expres.py "$@"
