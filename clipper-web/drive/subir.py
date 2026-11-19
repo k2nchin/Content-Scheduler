@@ -45,7 +45,7 @@ USUARIO_JSON = os.getenv("GOOGLE_DRIVE_USER_JSON", "/credenciales/usuario.json")
 CARPETA = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
 NOMBRE_RAIZ = os.getenv("DRIVE_CARPETA", "Content Scheduler").strip() or "Content Scheduler"
 CLIPS = Path(os.getenv("CLIPS_DIR", "/app/uploads/clips"))
-BORRAR = os.getenv("DRIVE_BORRAR_LOCAL", "false").lower() == "true"
+BORRAR = os.getenv("DRIVE_BORRAR_LOCAL", "true").lower() != "false"
 INTERVALO = max(5, int(os.getenv("DRIVE_INTERVALO", "15")))
 EXTENSIONES = {".mp4", ".mov", ".m4v"}
 ALCANCE = ["https://www.googleapis.com/auth/drive.file"]
@@ -256,6 +256,48 @@ def correo_de_la_cuenta() -> str:
         return "(no se pudo leer el json)"
 
 
+
+
+def borrar_origen_si_completo(trabajo: str) -> None:
+    """Cuando ya se subieron a Drive todos los clips de un trabajo, borra el
+    video largo original (/app/uploads/...) para que no se llene el iMac."""
+    try:
+        with psycopg.connect(BD, connect_timeout=10) as con, con.cursor() as cur:
+            cur.execute("SELECT filename FROM generated_clips WHERE task_id = %s", (trabajo,))
+            nombres = [f[0] for f in cur.fetchall() if f and f[0]]
+            if not nombres:
+                return
+            for n in nombres:
+                if not (CLIPS / f"{n}.drive").exists():
+                    return
+            cur.execute(
+                """
+                SELECT s.file_path, u.storage_reference
+                FROM tasks t
+                LEFT JOIN sources s ON s.id = t.source_id
+                LEFT JOIN stored_uploads u ON u.upload_url = s.url
+                WHERE t.id = %s
+                """,
+                (trabajo,),
+            )
+            fila = cur.fetchone()
+    except Exception as e:
+        log.warning("No pude comprobar el video origen de %s: %s", trabajo, e)
+        return
+    if not fila:
+        return
+    for ref in fila:
+        if not ref:
+            continue
+        for candidato in (Path(str(ref)), Path("/app/uploads") / Path(str(ref)).name):
+            if candidato.is_file() and "/clips/" not in str(candidato):
+                try:
+                    candidato.unlink()
+                    log.info("Material grabado original borrado del iMac: %s", candidato.name)
+                except OSError as e:
+                    log.warning("No se pudo borrar %s: %s", candidato, e)
+
+
 def vuelta(creds) -> None:
     if not CLIPS.is_dir():
         return
@@ -295,6 +337,9 @@ def vuelta(creds) -> None:
                 log.info("Borrado del disco: %s", clip.name)
             except OSError as e:
                 log.warning("No se pudo borrar %s: %s", clip.name, e)
+            datos_origen = origen(clip.name)
+            if datos_origen:
+                borrar_origen_si_completo(datos_origen[0])
 
 
 def buscar_o_crear(creds, nombre: str, dentro: str | None = None) -> str | None:

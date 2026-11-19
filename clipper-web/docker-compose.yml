@@ -638,7 +638,7 @@ services:
       - GOOGLE_DRIVE_FOLDER_ID=${GOOGLE_DRIVE_FOLDER_ID:-}
       - DRIVE_CARPETA=${DRIVE_CARPETA:-Content Scheduler}
       - CLIPS_DIR=/app/uploads/clips
-      - DRIVE_BORRAR_LOCAL=${DRIVE_BORRAR_LOCAL:-false}
+      - DRIVE_BORRAR_LOCAL=${DRIVE_BORRAR_LOCAL:-true}
       - DRIVE_INTERVALO=${DRIVE_INTERVALO:-15}
       # Con marca de agua puesta, no se sube nada hasta que la lleve.
       - DRIVE_ESPERAR_MARCA=${MARCA_ARCHIVO:+true}

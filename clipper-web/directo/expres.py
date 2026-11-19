@@ -348,6 +348,55 @@ def titulo_ia(motivo: str, mensajes_recientes: list[str]) -> str | None:
     return None
 
 
+
+
+def subir_a_drive_y_borrar(clip: Path, extra_borrar: Path | None, canal: str) -> None:
+    """Si hay credenciales en ../drive/credenciales/usuario.json, sube el clip a
+    Google Drive y borra los archivos grabados del iMac."""
+    if os.getenv("DRIVE_SUBIR", "true").lower() == "false":
+        return
+    cred_path = Path(__file__).resolve().parent.parent / "drive" / "credenciales" / "usuario.json"
+    if not cred_path.is_file():
+        return
+    try:
+        d = json.loads(cred_path.read_text())
+        req = urllib.request.Request(
+            "https://oauth2.googleapis.com/token",
+            data=urllib.parse.urlencode({
+                "client_id": d["client_id"],
+                "client_secret": d["client_secret"],
+                "refresh_token": d["refresh_token"],
+                "grant_type": "refresh_token",
+            }).encode(),
+        )
+        with urllib.request.urlopen(req, timeout=20) as r:
+            token = json.load(r)["access_token"]
+        carpeta = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+        boundary = f"===expres{int(time.time()*1000)}==="
+        meta_json = json.dumps({"name": clip.name, **({"parents": [carpeta]} if carpeta else {})}).encode()
+        cuerpo = (
+            f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode()
+            + meta_json
+            + f"\r\n--{boundary}\r\nContent-Type: video/mp4\r\n\r\n".encode()
+            + clip.read_bytes()
+            + f"\r\n--{boundary}--\r\n".encode()
+        )
+        up = urllib.request.Request(
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+            data=cuerpo,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": f"multipart/related; boundary={boundary}"},
+        )
+        with urllib.request.urlopen(up, timeout=300) as r:
+            fid = json.load(r).get("id", "?")
+        log(canal, f"☁️  Subido a Google Drive ({fid}). Borrando material grabado del iMac…")
+        if os.getenv("DRIVE_BORRAR_LOCAL", "true").lower() != "false":
+            for f in (clip, extra_borrar, clip.with_suffix(".json")):
+                if f and f.exists():
+                    f.unlink(missing_ok=True)
+    except Exception as e:  # noqa: BLE001
+        log(canal, f"No se pudo subir a Drive ({e}); conservo el clip en el iMac.")
+
+
 def cortar(g: Grabador, canal: str, motivo: str, puntaje: int = 85, textos_chat: list[str] | None = None) -> None:
     inicio = time.monotonic()
     trozos = g.ultimos(DURACION)
@@ -391,6 +440,7 @@ def cortar(g: Grabador, canal: str, motivo: str, puntaje: int = 85, textos_chat:
             log(canal, "No se pudo hacer el 9:16.")
     meta = {"motivo": motivo, "puntaje": puntaje, "titulo": gancho or f"{canal} · {motivo}", "hora": time.strftime("%H:%M:%S")}
     final_path.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False))
+    subir_a_drive_y_borrar(final_path, horizontal if horizontal != final_path else None, canal)
 
 
 # ── Chat (Twitch + Kick + YouTube) ───────────────────────────────────────────

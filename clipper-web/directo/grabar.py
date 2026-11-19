@@ -56,7 +56,7 @@ def cabeceras() -> dict:
     return {"Authorization": f"Bearer {CLAVE}"}
 
 
-def subir_y_clipear(trozo: Path, ajustes: dict | None = None) -> str | None:
+def subir_y_clipear(trozo: Path, ajustes: dict | None = None, cabeceras_extra: dict | None = None) -> str | None:
     """Sube el trozo al motor y le pide los clips. Devuelve el id del trabajo."""
     log.info("Subiendo %s (%.1f MB)", trozo.name, trozo.stat().st_size / 1e6)
     with trozo.open("rb") as f:
@@ -78,6 +78,12 @@ def subir_y_clipear(trozo: Path, ajustes: dict | None = None) -> str | None:
         return None
     tid = (r.json() or {}).get("task_id")
     log.info("Clipeando el trozo: trabajo %s", tid or "?")
+    if os.getenv("BORRAR_TROZO_SUBIDO", "true").lower() != "false":
+        try:
+            trozo.unlink()
+            log.info("Trozo grabado borrado del Mac tras enviarlo al motor: %s", trozo.name)
+        except OSError as e:
+            log.warning("No se pudo borrar el trozo %s: %s", trozo.name, e)
     return tid
 
 
