@@ -350,6 +350,186 @@ def titulo_ia(motivo: str, mensajes_recientes: list[str]) -> str | None:
 
 
 
+
+META_FILE = Path(__file__).resolve().parent.parent / "drive" / "credenciales" / "meta.json"
+
+
+def _token_google() -> str | None:
+    cred_path = Path(__file__).resolve().parent.parent / "drive" / "credenciales" / "usuario.json"
+    if not cred_path.is_file():
+        return None
+    d = json.loads(cred_path.read_text())
+    req = urllib.request.Request(
+        "https://oauth2.googleapis.com/token",
+        data=urllib.parse.urlencode({
+            "client_id": d["client_id"],
+            "client_secret": d["client_secret"],
+            "refresh_token": d["refresh_token"],
+            "grant_type": "refresh_token",
+        }).encode(),
+    )
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.load(r)["access_token"]
+
+
+def publicar_youtube(clip: Path, titulo: str, privacidad: str = "public") -> str:
+    """Sube el clip 9:16 como YouTube Short con la misma cuenta autorizada en Google."""
+    token = _token_google()
+    if not token:
+        raise RuntimeError("Falta autorizar Google (python3 drive/autorizar.py)")
+    t_short = (titulo if "#shorts" in titulo.lower() else f"{titulo} #Shorts")[:95]
+    meta = {
+        "snippet": {
+            "title": t_short,
+            "description": f"{titulo}\n\n#Shorts #clips",
+            "categoryId": "20",
+        },
+        "status": {"privacyStatus": os.getenv("YOUTUBE_PRIVACIDAD", privacidad), "selfDeclaredMadeForKids": False},
+    }
+    datos = clip.read_bytes()
+    init = urllib.request.Request(
+        "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        data=json.dumps(meta).encode(),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Length": str(len(datos)),
+            "X-Upload-Content-Type": "video/mp4",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(init, timeout=30) as r:
+        upload_url = r.headers.get("Location")
+    if not upload_url:
+        raise RuntimeError("YouTube no devolvió URL de subida (revisa que hayas autorizado con youtube.upload)")
+    put = urllib.request.Request(
+        upload_url,
+        data=datos,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "video/mp4"},
+        method="PUT",
+    )
+    with urllib.request.urlopen(put, timeout=600) as r:
+        vid = json.load(r).get("id", "?")
+    return vid
+
+
+def _meta_creds() -> dict:
+    """Lee token de página e ig_id desde variables o desde drive/credenciales/meta.json."""
+    cfg = {}
+    if META_FILE.is_file():
+        try:
+            cfg = json.loads(META_FILE.read_text())
+        except Exception:  # noqa: BLE001
+            cfg = {}
+    return {
+        "page_id": os.getenv("META_PAGE_ID", cfg.get("page_id", "")).strip(),
+        "page_token": os.getenv("META_PAGE_TOKEN", cfg.get("page_token", "")).strip(),
+        "ig_id": os.getenv("META_IG_ID", cfg.get("ig_id", "")).strip(),
+    }
+
+
+def guardar_meta(user_or_page_token: str) -> dict:
+    """Con un token de Facebook descubre automáticamente la Página y la cuenta de Instagram vinculada."""
+    url = (
+        "https://graph.facebook.com/v21.0/me/accounts"
+        "?fields=id,name,access_token,instagram_business_account{id,username}"
+        f"&access_token={urllib.parse.quote(user_or_page_token)}"
+    )
+    with urllib.request.urlopen(url, timeout=20) as r:
+        data = (json.load(r) or {}).get("data") or []
+    if not data:
+        # Quizá ya nos pasaron directamente un Page Access Token
+        url_me = (
+            "https://graph.facebook.com/v21.0/me"
+            "?fields=id,name,instagram_business_account{id,username}"
+            f"&access_token={urllib.parse.quote(user_or_page_token)}"
+        )
+        with urllib.request.urlopen(url_me, timeout=20) as r:
+            p = json.load(r)
+            p["access_token"] = user_or_page_token
+            data = [p]
+    p = data[0]
+    ig = p.get("instagram_business_account") or {}
+    info = {
+        "page_id": p["id"],
+        "page_name": p.get("name", "Página"),
+        "page_token": p.get("access_token", user_or_page_token),
+        "ig_id": ig.get("id", ""),
+        "ig_username": ig.get("username", ""),
+    }
+    META_FILE.parent.mkdir(parents=True, exist_ok=True)
+    META_FILE.write_text(json.dumps(info, indent=2, ensure_ascii=False))
+    return info
+
+
+def publicar_facebook(clip: Path, descripcion: str) -> str:
+    """Sube el clip 9:16 como Reel a la Página de Facebook."""
+    c = _meta_creds()
+    if not (c["page_id"] and c["page_token"]):
+        raise RuntimeError("Conecta Facebook/Instagram arriba pegando tu token de Meta")
+    g = "https://graph.facebook.com/v21.0"
+    tk = urllib.parse.quote(c["page_token"])
+    req1 = urllib.request.Request(f"{g}/{c['page_id']}/video_reels?upload_phase=start&access_token={tk}", method="POST")
+    with urllib.request.urlopen(req1, timeout=30) as r:
+        st = json.load(r)
+    vid, up_url = st["video_id"], st["upload_url"]
+    datos = clip.read_bytes()
+    req2 = urllib.request.Request(
+        up_url,
+        data=datos,
+        headers={"Authorization": f"OAuth {c['page_token']}", "offset": "0", "file_size": str(len(datos))},
+        method="POST",
+    )
+    with urllib.request.urlopen(req2, timeout=600) as r:
+        r.read()
+    desc = urllib.parse.quote(f"{descripcion} #Reels #clips")
+    req3 = urllib.request.Request(
+        f"{g}/{c['page_id']}/video_reels?upload_phase=finish&video_id={vid}&video_state=PUBLISHED&description={desc}&access_token={tk}",
+        method="POST",
+    )
+    with urllib.request.urlopen(req3, timeout=30) as r:
+        r.read()
+    return vid
+
+
+def publicar_instagram(clip: Path, descripcion: str) -> str:
+    """Sube el clip 9:16 como Reel a la cuenta profesional de Instagram."""
+    c = _meta_creds()
+    if not (c["ig_id"] and c["page_token"]):
+        raise RuntimeError("Tu página de Facebook no tiene cuenta profesional de Instagram vinculada o falta conectar Meta")
+    g = "https://graph.facebook.com/v21.0"
+    tk = urllib.parse.quote(c["page_token"])
+    cap = urllib.parse.quote(f"{descripcion} #Reels #clips")
+    req1 = urllib.request.Request(
+        f"{g}/{c['ig_id']}/media?media_type=REELS&upload_type=resumable&share_to_feed=true&caption={cap}&access_token={tk}",
+        method="POST",
+    )
+    with urllib.request.urlopen(req1, timeout=30) as r:
+        st = json.load(r)
+    cid, up_url = st["id"], st["uri"]
+    datos = clip.read_bytes()
+    req2 = urllib.request.Request(
+        up_url,
+        data=datos,
+        headers={"Authorization": f"OAuth {c['page_token']}", "offset": "0", "file_size": str(len(datos))},
+        method="POST",
+    )
+    with urllib.request.urlopen(req2, timeout=600) as r:
+        r.read()
+    for _ in range(60):
+        time.sleep(4)
+        with urllib.request.urlopen(f"{g}/{cid}?fields=status_code,status&access_token={tk}", timeout=20) as r:
+            est = json.load(r)
+        code = est.get("status_code", "")
+        if code == "FINISHED":
+            break
+        if code in ("ERROR", "EXPIRED"):
+            raise RuntimeError(f"Instagram rechazó el video: {est.get('status') or code}")
+    req3 = urllib.request.Request(f"{g}/{c['ig_id']}/media_publish?creation_id={cid}&access_token={tk}", method="POST")
+    with urllib.request.urlopen(req3, timeout=30) as r:
+        return json.load(r).get("id", cid)
+
+
 _CARPETAS_DRIVE: dict[str, str] = {}
 
 
@@ -419,11 +599,28 @@ def subir_a_drive_y_borrar(clip: Path, extra_borrar: Path | None, canal: str) ->
         )
         with urllib.request.urlopen(up, timeout=300) as r:
             fid = json.load(r).get("id", "?")
-        if os.getenv("DRIVE_BORRAR_LOCAL", "true").lower() != "false":
+        meta_f = clip.with_suffix(".json")
+        titulo = (json.loads(meta_f.read_text()).get("titulo") if meta_f.exists() else None) or f"{canal} clip"
+        for red, env_k, fn in (
+            ("YouTube", "AUTO_YOUTUBE", lambda: publicar_youtube(clip, titulo)),
+            ("Facebook", "AUTO_FACEBOOK", lambda: publicar_facebook(clip, titulo)),
+            ("Instagram", "AUTO_INSTAGRAM", lambda: publicar_instagram(clip, titulo)),
+        ):
+            if os.getenv(env_k, "false").lower() == "true":
+                try:
+                    rid = fn()
+                    log(canal, f"🚀 Publicado en {red} ({rid}) ✓")
+                except Exception as e_red:  # noqa: BLE001
+                    log(canal, f"⚠️ No se pudo autopublicar en {red}: {e_red}")
+        if os.getenv("DRIVE_BORRAR_LOCAL", "true").lower() == "false" or os.getenv("CONSERVAR_PARA_WEB", "true").lower() == "true":
+            if extra_borrar and extra_borrar.exists():
+                extra_borrar.unlink(missing_ok=True)
+            log(canal, f"☁️  Subido a Google Drive (Content Scheduler/{canal} · {fid}) ✓")
+        else:
             for f in (clip, extra_borrar, clip.with_suffix(".json")):
                 if f and f.exists():
                     f.unlink(missing_ok=True)
-        log(canal, f"☁️  Subido a Google Drive (Content Scheduler/{canal} · {fid}) y borrado del iMac ✓")
+            log(canal, f"☁️  Subido a Google Drive (Content Scheduler/{canal} · {fid}) y borrado del iMac ✓")
     except Exception as e:  # noqa: BLE001
         log(canal, f"No se pudo subir a Drive ({e}); conservo el clip en el iMac.")
 
@@ -791,11 +988,30 @@ button.sec{background:var(--bg2);border:1px solid var(--line)}
 <form class="add" onsubmit="agregar(event)">
   <input id="url" placeholder="Pega un directo o canal en vivo (https://kick.com/..., https://twitch.tv/..., https://youtube.com/@...)" required>
   <button type="submit">+ Vigilar directo</button>
+  <button type="button" class="sec" onclick="conectarMeta()">🔗 Conectar FB / IG</button>
 </form>
 <div id="lista" class="grid"></div>
 <script>
 let vistos = "";
 async function clipear(c){await fetch('/api/clip?canal='+encodeURIComponent(c),{method:'POST'});}
+async function pub(btn,red,ruta){
+  const txt = btn.textContent; btn.disabled = true; btn.textContent = 'Subiendo…';
+  const r = await fetch(`/api/publicar?red=${red}&ruta=${encodeURIComponent(decodeURI(ruta))}`,{method:'POST'});
+  const d = await r.json();
+  btn.disabled = false; btn.textContent = d.ok ? '✓ Subido' : txt;
+  if(!d.ok) alert(d.error || 'No se pudo subir');
+}
+async function borrar(ruta){
+  await fetch('/api/borrar?ruta='+encodeURIComponent(decodeURI(ruta)),{method:'POST'});
+  vistos=''; cargar();
+}
+async function conectarMeta(){
+  const t = prompt('Pega tu Token de Usuario o de Página de Meta (developers.facebook.com → Graph API Explorer con permisos pages_manage_posts, instagram_content_publish):');
+  if(!t) return;
+  const r = await fetch('/api/meta?token='+encodeURIComponent(t.trim()),{method:'POST'});
+  const d = await r.json();
+  alert(d.ok ? `Conectado: ${d.info.page_name}` + (d.info.ig_username ? ` + @${d.info.ig_username}` : '') : ('Error: '+d.error));
+}
 async function agregar(e){
   e.preventDefault();
   const u = document.getElementById('url');
@@ -814,8 +1030,14 @@ async function cargar(){
   const el = document.getElementById('lista');
   if (!r.clips.length){ el.innerHTML = '<p class="vacio">Escuchando el audio del streamer y el chat en vivo… En cuanto haya gritos, risas o explote el chat, el clip 9:16 sale aquí solo.</p>'; return; }
   el.innerHTML = r.clips.map(c => `<div class="card"><span class="badge">🔥 ${c.puntaje} pts</span><video controls preload="metadata" src="/video/${encodeURI(c.ruta)}"></video>
-    <div class="meta"><div class="top"><strong style="color:var(--fg)">${c.titulo}</strong><a download href="/video/${encodeURI(c.ruta)}">⬇ Bajar</a></div>
-    <small style="color:var(--muted)">${c.motivo}</small></div></div>`).join('');
+    <div class="meta"><div class="top"><strong style="color:var(--fg)">${c.titulo}</strong><a download href="/video/${encodeURI(c.ruta)}">⬇</a></div>
+    <small style="color:var(--muted)">${c.motivo}</small>
+    <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">
+      <button style="flex:1;padding:6px 8px;font-size:11px;background:#ff0033" onclick="pub(this,'youtube','${encodeURI(c.ruta)}')">▶ YouTube</button>
+      <button style="flex:1;padding:6px 8px;font-size:11px;background:#1877f2" onclick="pub(this,'facebook','${encodeURI(c.ruta)}')">f Facebook</button>
+      <button style="flex:1;padding:6px 8px;font-size:11px;background:#d62976" onclick="pub(this,'instagram','${encodeURI(c.ruta)}')">📸 Instagram</button>
+      <button class="sec" style="padding:6px 8px;font-size:11px" title="Borrar del Mac" onclick="borrar('${encodeURI(c.ruta)}')">🗑</button>
+    </div></div></div>`).join('');
 }
 cargar(); setInterval(cargar, 3000);
 </script></html>"""
@@ -842,6 +1064,58 @@ class Web(http.server.BaseHTTPRequestHandler):
                 threading.Thread(target=vigilar_canal, args=(u,), name=nombre_de(u), daemon=True).start()
             self.send_response(204)
             self.end_headers()
+            return
+        if self.path.startswith("/api/meta"):
+            tk = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("token", [""])[0].strip()
+            try:
+                info = guardar_meta(tk)
+                resp = {"ok": True, "info": info}
+            except Exception as e:  # noqa: BLE001
+                resp = {"ok": False, "error": str(e)}
+            cuerpo = json.dumps(resp).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(cuerpo)
+            return
+        if self.path.startswith("/api/borrar"):
+            rel = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("ruta", [""])[0]
+            archivo = (SALIDA / rel).resolve()
+            if SALIDA.resolve() in archivo.parents and archivo.is_file():
+                archivo.unlink(missing_ok=True)
+                archivo.with_suffix(".json").unlink(missing_ok=True)
+            self.send_response(204)
+            self.end_headers()
+            return
+        if self.path.startswith("/api/publicar"):
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            red = qs.get("red", [""])[0]
+            rel = qs.get("ruta", [""])[0]
+            archivo = (SALIDA / rel).resolve()
+            try:
+                if not (SALIDA.resolve() in archivo.parents and archivo.is_file()):
+                    raise RuntimeError("El archivo ya no está en el Mac")
+                meta_f = archivo.with_suffix(".json")
+                titulo = (json.loads(meta_f.read_text()).get("titulo") if meta_f.exists() else None) or archivo.stem
+                if red == "youtube":
+                    rid = publicar_youtube(archivo, titulo)
+                elif red == "facebook":
+                    rid = publicar_facebook(archivo, titulo)
+                elif red == "instagram":
+                    rid = publicar_instagram(archivo, titulo)
+                else:
+                    raise RuntimeError("Red desconocida")
+                if os.getenv("BORRAR_TRAS_PUBLICAR", "false").lower() == "true":
+                    archivo.unlink(missing_ok=True)
+                    meta_f.unlink(missing_ok=True)
+                resp = {"ok": True, "id": rid}
+            except Exception as e:  # noqa: BLE001
+                resp = {"ok": False, "error": str(e)}
+            cuerpo = json.dumps(resp).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(cuerpo)
 
     def do_GET(self):
         if self.path == "/api/estado":

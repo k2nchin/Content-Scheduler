@@ -27,9 +27,9 @@ AQUI = Path(__file__).resolve().parent
 CLIENTE = AQUI / "credenciales" / "cliente-oauth.json"
 SALIDA = AQUI / "credenciales" / "usuario.json"
 # El estrecho: la app solo ve lo que ella misma crea. Es el que queremos.
-SOLO_LO_SUYO = "https://www.googleapis.com/auth/drive.file"
+SOLO_LO_SUYO = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/youtube.upload"
 # El amplio: hace falta para escribir en una carpeta que creaste tú a mano.
-TODO_EL_DRIVE = "https://www.googleapis.com/auth/drive"
+TODO_EL_DRIVE = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/youtube.upload"
 PUERTO = 8765
 
 
