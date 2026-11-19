@@ -20,7 +20,7 @@ Mientras corre:  Enter = clip ahora en todos los canales;  nombre + Enter = solo
 Chat (para clipear solo):
     Twitch   funciona sin configurar nada.
     YouTube  necesita YOUTUBE_API_KEY (Google Cloud → YouTube Data API v3 → clave de API).
-    Kick     no tiene API de chat pública: solo clip manual con Enter.
+    Kick     lee el chat en vivo por el WebSocket público de Kick + el audio del streamer.
 
 Variables (todas opcionales):
     CARPETA_CLIPS        dónde guardar (por defecto ~/Desktop/Clips exprés).
@@ -42,12 +42,15 @@ Variables (todas opcionales):
 
 from __future__ import annotations
 
+import base64
 import calendar
 import collections
 import http.server
 import json
 import os
 import random
+import ssl
+import struct
 import re
 import shutil
 import socket
@@ -71,6 +74,10 @@ VERTICAL = os.getenv("VERTICAL", "1") != "0"
 CAMARA = os.getenv("CAMARA", "auto").strip().lower()
 ALTURA = os.getenv("ALTURA_MAXIMA", "720")
 YT_KEY = os.getenv("YOUTUBE_API_KEY", "").strip()
+NIM_KEY = os.getenv("NVIDIA_API_KEY", "").strip()
+GOOGLE_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
+FACTOR_AUDIO = float(os.getenv("FACTOR_AUDIO", "2.6"))
+MIN_DB_PICO = float(os.getenv("MIN_DB_PICO", "-32"))
 PUERTO_WEB = int(os.getenv("PUERTO_WEB", "8090"))
 SALIDA = Path(os.getenv("CARPETA_CLIPS", str(Path.home() / "Desktop" / "Clips exprés"))).expanduser()
 CANALES_TXT = Path(__file__).with_name("canales.txt")
@@ -261,7 +268,87 @@ def filtro_vertical(video: Path) -> str:
     )
 
 
-def cortar(g: Grabador, canal: str, motivo: str) -> None:
+def nivel_audio_db(trozo: Path) -> float:
+    """Volumen RMS en dB de un trozo de 2 s (-90 = silencio, 0 = máximo)."""
+    r = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-nostats", "-i", str(trozo), "-af", "astats=metadata=1:reset=0", "-f", "null", "-"],
+        capture_output=True, text=True, timeout=8,
+    )
+    vals = [float(x) for x in re.findall(r"RMS level dB:\s*(-?\d+(?:\.\d+)?)", r.stderr)]
+    return max(vals) if vals else -90.0
+
+
+class AudioEnergia:
+    """Detecta gritos, risas fuertes, golpes o reacciones del streamer en el audio."""
+
+    def __init__(self):
+        self.niveles: collections.deque[tuple[float, float]] = collections.deque(maxlen=60)
+        self.vistos: set[str] = set()
+
+    def revisar(self, g: Grabador) -> tuple[str | None, int]:
+        trozos = sorted(g.dir.glob("s*.ts"), key=lambda p: p.stat().st_mtime)[:-1]
+        if not trozos:
+            return None, 0
+        ultimo = trozos[-1]
+        if ultimo.name in self.vistos:
+            return None, 0
+        self.vistos.add(ultimo.name)
+        db = nivel_audio_db(ultimo)
+        if db <= -80:
+            return None, 0
+        ahora = time.time()
+        self.niveles.append((ahora, db))
+        if len(self.niveles) < 8:
+            return None, 0
+        recientes = [d for t, d in self.niveles if t > ahora - 4.5]
+        historia = sorted(d for t, d in self.niveles if t <= ahora - 4.5)
+        if not recientes or len(historia) < 5:
+            return None, 0
+        pico_db = max(recientes)
+        base_db = historia[len(historia) // 2]
+        ratio = 10 ** ((pico_db - base_db) / 20.0)
+        if pico_db >= MIN_DB_PICO and ratio >= FACTOR_AUDIO:
+            pts = min(100, int(60 + min(40, (ratio - FACTOR_AUDIO) * 14)))
+            return f"grito/reacción audio x{ratio:.1f}", pts
+        return None, 0
+
+
+def titulo_ia(motivo: str, mensajes_recientes: list[str]) -> str | None:
+    """Si hay NVIDIA_API_KEY o GOOGLE_API_KEY, genera un gancho corto a partir del chat."""
+    muestra = " | ".join(m.strip() for m in mensajes_recientes[-25:] if m.strip())[:700]
+    if not muestra:
+        return None
+    prompt = (
+        f"El directo acaba de tener un momentazo ({motivo}): [{muestra}]. "
+        "Escribe UN título viral en español de máximo 7 palabras para el clip. Solo el título, sin comillas."
+    )
+    try:
+        if NIM_KEY:
+            req = urllib.request.Request(
+                "https://integrate.api.nvidia.com/v1/chat/completions",
+                data=json.dumps({
+                    "model": "meta/llama-3.1-8b-instruct",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 30,
+                }).encode(),
+                headers={"Authorization": f"Bearer {NIM_KEY}", "Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=8) as r:
+                return json.load(r)["choices"][0]["message"]["content"].strip().strip('"«»')
+        if GOOGLE_KEY:
+            req = urllib.request.Request(
+                f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GOOGLE_KEY}",
+                data=json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=8) as r:
+                return json.load(r)["candidates"][0]["content"]["parts"][0]["text"].strip().strip('"«»')
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def cortar(g: Grabador, canal: str, motivo: str, puntaje: int = 85, textos_chat: list[str] | None = None) -> None:
     inicio = time.monotonic()
     trozos = g.ultimos(DURACION)
     if not trozos:
@@ -271,7 +358,6 @@ def cortar(g: Grabador, canal: str, motivo: str) -> None:
     destino.mkdir(parents=True, exist_ok=True)
     marca = time.strftime("%Y%m%d-%H%M%S")
 
-    # Copia los trozos para que el anillo no los pise mientras se juntan.
     tmp = Path(tempfile.mkdtemp(prefix="clip-", dir=g.dir))
     lista = tmp / "lista.txt"
     copias = []
@@ -281,7 +367,7 @@ def cortar(g: Grabador, canal: str, motivo: str) -> None:
         copias.append(c)
     lista.write_text("".join(f"file '{c}'\n" for c in copias))
 
-    horizontal = destino / f"{marca}_{canal}.mp4"
+    horizontal = destino / f"{marca}_{canal}_{puntaje}pts.mp4"
     base = ["-f", "concat", "-safe", "0", "-i", str(lista), "-c", "copy", "-movflags", "+faststart"]
     if not ffmpeg(*base[:6], "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", str(horizontal)):
         ffmpeg(*base, str(horizontal))
@@ -289,28 +375,38 @@ def cortar(g: Grabador, canal: str, motivo: str) -> None:
     if not horizontal.exists():
         log(canal, "No se pudo cortar el clip.")
         return
-    log(canal, f"✂️  Clip ({motivo}) en {time.monotonic() - inicio:.1f} s → {horizontal.name}")
+    log(canal, f"✂️  Clip {puntaje}pts ({motivo}) en {time.monotonic() - inicio:.1f} s → {horizontal.name}")
 
+    gancho = titulo_ia(motivo, textos_chat or [])
+    final_path = horizontal
     if VERTICAL:
         t = time.monotonic()
-        vertical = destino / f"{marca}_{canal}_9x16.mp4"
+        vertical = destino / f"{marca}_{canal}_{puntaje}pts_9x16.mp4"
         ok = ffmpeg("-i", str(horizontal), "-filter_complex", filtro_vertical(horizontal),
                     *CODIFICADOR, "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(vertical))
-        log(canal, f"📱 9:16 en {time.monotonic() - t:.1f} s → {vertical.name}" if ok else "No se pudo hacer el 9:16.")
+        if ok:
+            final_path = vertical
+            log(canal, f"📱 9:16 en {time.monotonic() - t:.1f} s → {vertical.name}")
+        else:
+            log(canal, "No se pudo hacer el 9:16.")
+    meta = {"motivo": motivo, "puntaje": puntaje, "titulo": gancho or f"{canal} · {motivo}", "hora": time.strftime("%H:%M:%S")}
+    final_path.with_suffix(".json").write_text(json.dumps(meta, ensure_ascii=False))
 
 
-# ── Chat ─────────────────────────────────────────────────────────────────────
+# ── Chat (Twitch + Kick + YouTube) ───────────────────────────────────────────
 
 class Chat:
     def __init__(self):
         self.mensajes: collections.deque[float] = collections.deque()
         self.palabras: collections.deque[float] = collections.deque()
+        self.ultimos_textos: collections.deque[str] = collections.deque(maxlen=40)
         self.lock = threading.Lock()
 
     def llega(self, texto: str, cuando: float | None = None) -> None:
         t = cuando or time.time()
         with self.lock:
             self.mensajes.append(t)
+            self.ultimos_textos.append(texto)
             if PALABRAS.search(texto):
                 self.palabras.append(t)
             limite = time.time() - 180
@@ -319,19 +415,30 @@ class Chat:
             while self.palabras and self.palabras[0] < limite:
                 self.palabras.popleft()
 
+    def textos(self) -> list[str]:
+        with self.lock:
+            return list(self.ultimos_textos)
+
     def pico(self) -> str | None:
-        """Devuelve el motivo si ahora mismo el chat está explotando."""
+        motivo, _ = self.pico_con_puntaje()
+        return motivo
+
+    def pico_con_puntaje(self) -> tuple[str | None, int]:
+        """Devuelve (motivo, puntaje 0-100) si ahora mismo el chat está explotando."""
         ahora = time.time()
         with self.lock:
             recientes = sum(1 for t in self.mensajes if t > ahora - 5)
             antes = sum(1 for t in self.mensajes if ahora - 125 < t <= ahora - 5)
             risas = sum(1 for t in self.palabras if t > ahora - 5)
         ritmo, normal = recientes / 5, antes / 120
+        mult = ritmo / max(normal, 0.12)
         if ritmo >= MINIMO and ritmo >= normal * FACTOR:
-            return f"chat x{ritmo / max(normal, 0.01):.0f}"
+            pts = min(100, int(62 + min(30, (mult - FACTOR) * 6) + min(10, risas * 2)))
+            return f"chat x{ritmo / max(normal, 0.01):.0f}", pts
         if risas >= 4:
-            return "risas/clip en el chat"
-        return None
+            pts = min(98, 65 + risas * 4)
+            return "risas/clip en el chat", pts
+        return None, 0
 
 
 def chat_twitch(canal: str, chat: Chat, parar: threading.Event) -> None:
@@ -361,6 +468,116 @@ def chat_twitch(canal: str, chat: Chat, parar: threading.Event) -> None:
             time.sleep(5)
 
 
+def _ws_send(sock: ssl.SSLSocket, payload: str, opcode: int = 1) -> None:
+    raw = payload.encode("utf-8")
+    mask = os.urandom(4)
+    header = bytearray([0x80 | opcode])
+    n = len(raw)
+    if n < 126:
+        header.append(0x80 | n)
+    elif n < 65536:
+        header.append(0x80 | 126)
+        header.extend(struct.pack("!H", n))
+    else:
+        header.append(0x80 | 127)
+        header.extend(struct.pack("!Q", n))
+    header.extend(mask)
+    masked = bytes(b ^ mask[i % 4] for i, b in enumerate(raw))
+    sock.sendall(bytes(header) + masked)
+
+
+def _ws_recv(sock: ssl.SSLSocket) -> tuple[int, bytes] | None:
+    def leer(k: int) -> bytes:
+        b = b""
+        while len(b) < k:
+            trozo = sock.recv(k - len(b))
+            if not trozo:
+                raise EOFError
+            b += trozo
+        return b
+
+    b0, b1 = leer(2)
+    op = b0 & 0x0F
+    masked = b1 & 0x80
+    n = b1 & 0x7F
+    if n == 126:
+        n = struct.unpack("!H", leer(2))[0]
+    elif n == 127:
+        n = struct.unpack("!Q", leer(8))[0]
+    mask = leer(4) if masked else b""
+    datos = leer(n)
+    if masked:
+        datos = bytes(b ^ mask[i % 4] for i, b in enumerate(datos))
+    return op, datos
+
+
+def _kick_chatroom_id(canal: str) -> int | None:
+    req = urllib.request.Request(
+        f"https://kick.com/api/v2/channels/{canal}",
+        headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return int(json.load(r)["chatroom"]["id"])
+    except Exception:  # noqa: BLE001
+        r = subprocess.run(
+            ["yt-dlp", "--quiet", "--no-warnings", "--dump-single-json", f"https://kick.com/{canal}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        m = re.search(r'"chatroom_id"\s*:\s*(\d+)', r.stdout)
+        return int(m.group(1)) if m else None
+
+
+def chat_kick(canal: str, chat: Chat, parar: threading.Event) -> None:
+    """Lee el chat público de Kick en tiempo real por su WebSocket Pusher (sin clave)."""
+    room = _kick_chatroom_id(canal)
+    if not room:
+        log(canal, "Chat de Kick bloqueado por Cloudflare; detecto los mejores momentos por el AUDIO del streamer.")
+        return
+    log(canal, f"Chat de Kick conectado en vivo (sala {room}) + detector de audio activo.")
+    host = "ws-us2.pusher.com"
+    ruta = "/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0-rc2&flash=false"
+    while not parar.is_set():
+        try:
+            raw_sock = socket.create_connection((host, 443), timeout=20)
+            s = ssl.create_default_context().wrap_socket(raw_sock, server_hostname=host)
+            key = base64.b64encode(os.urandom(16)).decode()
+            s.sendall(
+                f"GET {ruta} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\n"
+                f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n".encode()
+            )
+            resp = b""
+            while b"\r\n\r\n" not in resp:
+                resp += s.recv(1024)
+            _ws_send(s, json.dumps({"event": "pusher:subscribe", "data": {"auth": "", "channel": f"chatrooms.{room}.v2"}}))
+            s.settimeout(25)
+            while not parar.is_set():
+                try:
+                    rec = _ws_recv(s)
+                except socket.timeout:
+                    _ws_send(s, json.dumps({"event": "pusher:ping", "data": {}}))
+                    continue
+                if not rec:
+                    break
+                op, payload = rec
+                if op == 8:
+                    break
+                if op == 9:
+                    _ws_send(s, payload.decode("utf-8", "ignore"), opcode=10)
+                    continue
+                ev = json.loads(payload.decode("utf-8", "ignore") or "{}")
+                if "ChatMessageEvent" in str(ev.get("event", "")):
+                    data = ev.get("data")
+                    if isinstance(data, str):
+                        data = json.loads(data)
+                    if isinstance(data, dict) and data.get("content"):
+                        chat.llega(str(data["content"]))
+            s.close()
+        except Exception as e:  # noqa: BLE001
+            log(canal, f"Reconectando chat de Kick ({e})…")
+            time.sleep(5)
+
+
 def yt_api(ruta: str, **q) -> dict:
     q["key"] = YT_KEY
     url = f"https://www.googleapis.com/youtube/v3/{ruta}?{urllib.parse.urlencode(q)}"
@@ -374,7 +591,7 @@ def iso_a_epoch(s: str) -> float:
 
 def chat_youtube(canal: str, enlace: str, chat: Chat, parar: threading.Event) -> None:
     if not YT_KEY:
-        log(canal, "Sin YOUTUBE_API_KEY no leo el chat de YouTube: solo clip manual (Enter).")
+        log(canal, "Sin YOUTUBE_API_KEY: detecto los mejores momentos por el AUDIO del directo.")
         return
     try:
         r = subprocess.run(["yt-dlp", "--quiet", "--no-warnings", "--skip-download", "--print", "%(id)s", enlace],
@@ -383,7 +600,7 @@ def chat_youtube(canal: str, enlace: str, chat: Chat, parar: threading.Event) ->
         datos = yt_api("videos", part="liveStreamingDetails", id=video)
         chat_id = datos["items"][0]["liveStreamingDetails"]["activeLiveChatId"]
     except Exception as e:  # noqa: BLE001
-        log(canal, f"No pude abrir el chat de YouTube ({e}): solo clip manual.")
+        log(canal, f"Sin chat de YouTube ({e}): detecto momentos por el AUDIO.")
         return
     token, primero = None, True
     while not parar.is_set():
@@ -392,13 +609,12 @@ def chat_youtube(canal: str, enlace: str, chat: Chat, parar: threading.Event) ->
             if token:
                 q["pageToken"] = token
             r = yt_api("liveChat/messages", **q)
-            if not primero:  # la primera página es historial, no cuenta
+            if not primero:
                 for it in r.get("items", []):
                     sn = it.get("snippet", {})
                     chat.llega(sn.get("displayMessage", ""), iso_a_epoch(sn.get("publishedAt", "")) if sn.get("publishedAt") else None)
             primero = False
             token = r.get("nextPageToken")
-            # Cada lectura gasta cuota; 10 s da para ~5 h de directo al día.
             parar.wait(max(r.get("pollingIntervalMillis", 10000) / 1000, 10))
         except Exception as e:  # noqa: BLE001
             log(canal, f"Chat de YouTube: {e}")
@@ -420,29 +636,43 @@ def vigilar_canal(canal_url: str) -> None:
             time.sleep(60)
             continue
         avisado = False
-        log(nombre, "🔴 En vivo. Grabando buffer de los últimos %d s." % BUFFER)
+        log(nombre, "🔴 En vivo. Analizando AUDIO + CHAT para cazar los mejores momentos (buffer %d s)." % BUFFER)
         g = Grabador(enlace, nombre)
         g.empezar()
-        chat, parar = Chat(), threading.Event()
+        chat, audio, parar = Chat(), AudioEnergia(), threading.Event()
         if "twitch.tv" in canal_url:
             threading.Thread(target=chat_twitch, args=(nombre, chat, parar), daemon=True).start()
+        elif "kick.com" in canal_url:
+            threading.Thread(target=chat_kick, args=(nombre, chat, parar), daemon=True).start()
         elif "youtube.com" in canal_url or "youtu.be" in canal_url:
             threading.Thread(target=chat_youtube, args=(nombre, enlace, chat, parar), daemon=True).start()
-        else:
-            log(nombre, "Sin chat para esta plataforma: clip manual con Enter.")
         ultimo = 0.0
         while g.vivo():
             time.sleep(1)
-            motivo = "manual" if manual.is_set() else chat.pico()
-            manual.clear()
+            if manual.is_set():
+                manual.clear()
+                motivo, pts = "manual", 95
+            else:
+                m_chat, p_chat = chat.pico_con_puntaje()
+                m_aud, p_aud = audio.revisar(g)
+                if m_chat and m_aud:
+                    motivo, pts = f"{m_chat} + {m_aud}", min(100, max(p_chat, p_aud) + 15)
+                elif m_chat:
+                    motivo, pts = m_chat, p_chat
+                else:
+                    motivo, pts = m_aud, p_aud
             if motivo and (motivo == "manual" or time.monotonic() - ultimo > ESPERA_CLIPS):
                 ultimo = time.monotonic()
-                log(nombre, f"⚡ Momento ({motivo}); corto en {DESPUES} s…")
-                threading.Thread(target=lambda m=motivo: (time.sleep(DESPUES), cortar(g, nombre, m)), daemon=True).start()
+                textos = chat.textos()
+                log(nombre, f"🔥 Momentazo {pts}pts ({motivo}); corto en {DESPUES} s…")
+                threading.Thread(
+                    target=lambda m=motivo, p=pts, tx=textos: (time.sleep(DESPUES), cortar(g, nombre, m, p, tx)),
+                    daemon=True,
+                ).start()
         parar.set()
         g.parar()
         log(nombre, "El directo terminó.")
-        time.sleep(DESPUES + 30)  # deja acabar los cortes pendientes
+        time.sleep(DESPUES + 30)
         g.limpiar()
 
 
@@ -459,36 +689,53 @@ def teclado() -> None:
 HTML = """<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Directo exprés — Content Scheduler</title>
 <style>
-:root{--bg:#070708;--bg2:#101012;--fg:#F5F3EF;--muted:#8B8890;--accent:#FF0A8A;--line:#222126}
+:root{--bg:#070708;--bg2:#101012;--fg:#F5F3EF;--muted:#8B8890;--accent:#FF0A8A;--ok:#5EE6A8;--line:#222126}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,sans-serif;padding:24px}
-header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;max-width:1280px;margin:0 auto 22px}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;max-width:1280px;margin:0 auto 18px}
 h1{font-size:22px;margin:0}button{background:var(--accent);color:#fff;border:0;border-radius:11px;padding:10px 16px;font-weight:700;cursor:pointer}
-button.sec{background:var(--bg2);border:1px solid var(--line)}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px;max-width:1280px;margin:0 auto}
-.card{background:var(--bg2);border:1px solid var(--line);border-radius:14px;overflow:hidden}.card video{width:100%;aspect-ratio:9/16;background:#000;display:block}
-.meta{padding:10px 12px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--muted)}
-.meta a{color:var(--fg);text-decoration:none;font-weight:700}p.vacio{color:var(--muted);max-width:1280px;margin:40px auto}
+button.sec{background:var(--bg2);border:1px solid var(--line)}
+.add{display:flex;gap:8px;max-width:1280px;margin:0 auto 22px}
+.add input{flex:1;background:var(--bg2);border:1px solid var(--line);border-radius:11px;padding:10px 14px;color:var(--fg);font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;max-width:1280px;margin:0 auto}
+.card{background:var(--bg2);border:1px solid var(--line);border-radius:14px;overflow:hidden;position:relative}
+.card video{width:100%;aspect-ratio:9/16;background:#000;display:block}
+.badge{position:absolute;top:10px;left:10px;background:rgba(7,7,8,.82);border:1px solid var(--ok);color:var(--ok);font-weight:800;font-size:12px;padding:3px 9px;border-radius:99px}
+.meta{padding:10px 12px;font-size:13px;display:flex;flex-direction:column;gap:4px}
+.meta .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.meta a{color:var(--accent);text-decoration:none;font-weight:700}p.vacio{color:var(--muted);max-width:1280px;margin:40px auto}
 </style>
 <header>
-  <div><h1>✂️ Directo exprés</h1><small id="sub" style="color:var(--muted)"></small></div>
+  <div><h1>🔥 Directo exprés · Cazador de momentos (Audio + Chat)</h1><small id="sub" style="color:var(--muted)"></small></div>
   <div id="btns" style="display:flex;gap:8px;flex-wrap:wrap"><button onclick="clipear('')">⚡ Clip ahora (todos)</button></div>
 </header>
+<form class="add" onsubmit="agregar(event)">
+  <input id="url" placeholder="Pega un directo o canal en vivo (https://kick.com/..., https://twitch.tv/..., https://youtube.com/@...)" required>
+  <button type="submit">+ Vigilar directo</button>
+</form>
 <div id="lista" class="grid"></div>
 <script>
 let vistos = "";
 async function clipear(c){await fetch('/api/clip?canal='+encodeURIComponent(c),{method:'POST'});}
+async function agregar(e){
+  e.preventDefault();
+  const u = document.getElementById('url');
+  await fetch('/api/canal?url='+encodeURIComponent(u.value),{method:'POST'});
+  u.value = ''; cargar();
+}
 async function cargar(){
   const r = await (await fetch('/api/estado')).json();
-  document.getElementById('sub').textContent = 'Canales: ' + (r.canales.join(', ') || 'ninguno') + ' · Carpeta: ' + r.carpeta;
+  document.getElementById('sub').textContent = 'Vigilando (Audio + Chat): ' + (r.canales.join(', ') || 'ninguno') + ' · Ordenados por puntaje viral';
   const b = document.getElementById('btns');
   b.innerHTML = '<button onclick="clipear(\'\')">⚡ Clip ahora</button>' +
     r.canales.map(c => `<button class="sec" onclick="clipear('${c}')">✂️ ${c}</button>`).join('');
-  const clave = r.clips.map(x => x.ruta).join('|');
+  const clave = r.clips.map(x => x.ruta + x.puntaje).join('|');
   if (clave === vistos) return;
   vistos = clave;
   const el = document.getElementById('lista');
-  if (!r.clips.length){ el.innerHTML = '<p class="vacio">Aún no hay clips. Pulsa «⚡ Clip ahora» o espera a que explote el chat.</p>'; return; }
-  el.innerHTML = r.clips.map(c => `<div class="card"><video controls preload="metadata" src="/video/${encodeURI(c.ruta)}"></video>
-    <div class="meta"><span>${c.nombre}</span><a download href="/video/${encodeURI(c.ruta)}">⬇ Bajar</a></div></div>`).join('');
+  if (!r.clips.length){ el.innerHTML = '<p class="vacio">Escuchando el audio del streamer y el chat en vivo… En cuanto haya gritos, risas o explote el chat, el clip 9:16 sale aquí solo.</p>'; return; }
+  el.innerHTML = r.clips.map(c => `<div class="card"><span class="badge">🔥 ${c.puntaje} pts</span><video controls preload="metadata" src="/video/${encodeURI(c.ruta)}"></video>
+    <div class="meta"><div class="top"><strong style="color:var(--fg)">${c.titulo}</strong><a download href="/video/${encodeURI(c.ruta)}">⬇ Bajar</a></div>
+    <small style="color:var(--muted)">${c.motivo}</small></div></div>`).join('');
 }
 cargar(); setInterval(cargar, 3000);
 </script></html>"""
@@ -506,16 +753,33 @@ class Web(http.server.BaseHTTPRequestHandler):
                     ev.set()
             self.send_response(204)
             self.end_headers()
+            return
+        if self.path.startswith("/api/canal"):
+            u = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("url", [""])[0].strip()
+            if u.startswith(("http://", "https://")) and nombre_de(u) not in manuales:
+                threading.Thread(target=vigilar_canal, args=(u,), name=nombre_de(u), daemon=True).start()
+            self.send_response(204)
+            self.end_headers()
 
     def do_GET(self):
         if self.path == "/api/estado":
             archivos = sorted(SALIDA.glob("*/*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
             prefer = [p for p in archivos if p.name.endswith("_9x16.mp4")] or archivos
-            datos = {
-                "canales": list(manuales.keys()),
-                "carpeta": str(SALIDA),
-                "clips": [{"nombre": p.name, "ruta": str(p.relative_to(SALIDA))} for p in prefer[:60]],
-            }
+            clips = []
+            for p in prefer[:60]:
+                meta_f = p.with_suffix(".json")
+                meta = json.loads(meta_f.read_text()) if meta_f.exists() else {}
+                m_pts = re.search(r"_(\d+)pts", p.name)
+                pts = int(meta.get("puntaje") or (m_pts.group(1) if m_pts else 80))
+                clips.append({
+                    "nombre": p.name,
+                    "ruta": str(p.relative_to(SALIDA)),
+                    "puntaje": pts,
+                    "titulo": meta.get("titulo") or p.stem,
+                    "motivo": meta.get("motivo") or "momento destacado",
+                })
+            clips.sort(key=lambda c: (c["puntaje"], c["nombre"]), reverse=True)
+            datos = {"canales": list(manuales.keys()), "carpeta": str(SALIDA), "clips": clips}
             cuerpo = json.dumps(datos).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -548,9 +812,6 @@ def main() -> int:
     canales = sys.argv[1:]
     if not canales and CANALES_TXT.exists():
         canales = [l.strip() for l in CANALES_TXT.read_text().splitlines() if l.strip() and not l.startswith("#")]
-    if not canales:
-        print(__doc__)
-        return 1
     SALIDA.mkdir(parents=True, exist_ok=True)
     print(f"Clips en: {SALIDA}\nEnter = clip ahora en todos · nombre + Enter = solo ese · Ctrl+C para salir\n", flush=True)
     for c in canales:
@@ -558,7 +819,7 @@ def main() -> int:
     if PUERTO_WEB:
         srv = http.server.ThreadingHTTPServer(("127.0.0.1", PUERTO_WEB), Web)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
-        print(f"🌐 Véalos en vivo en:  http://localhost:{PUERTO_WEB}\n", flush=True)
+        print(f"🌐 Abre el panel en:  http://localhost:{PUERTO_WEB}\n", flush=True)
     threading.Thread(target=teclado, daemon=True).start()
     try:
         while True:
