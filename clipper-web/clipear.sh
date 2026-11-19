@@ -3,26 +3,30 @@
 # cámara redondeada arriba y el juego abajo, los sube a tu Google Drive
 # (carpeta "Content Scheduler/<canal>") y borra todo el material grabado del iMac.
 #
-#   ./clipear.sh https://kick.com/rdjavi https://twitch.tv/otrocanal
-#   ./clipear.sh --servicio https://kick.com/rdjavi   # queda activo 24/7 en el Mac (LaunchAgent + caffeinate)
-#   ./clipear.sh --parar                              # apaga el servicio 24/7
+#   ./clipear.sh https://kick.com/rdjavi
+#   ./clipear.sh --servicio https://kick.com/rdjavi
+#   ./clipear.sh --parar
 set -euo pipefail
 
 cd "$(dirname "$0")"
 RAIZ="$(pwd)"
-ETIQUETA="com.contentscheduler.clipear"
-PLIST="$HOME/Library/LaunchAgents/$ETIQUETA.plist"
 LOG="$HOME/Library/Logs/clipear.log"
+PIDFILE="$HOME/.local/clipear.pid"
 
 if [ "${1:-}" = "--parar" ]; then
-  launchctl bootout "gui/$(id -u)/$ETIQUETA" 2>/dev/null || true
-  rm -f "$PLIST"
-  echo "✓ Servicio 24/7 detenido."
+  launchctl bootout "gui/$(id -u)/com.contentscheduler.clipear" 2>/dev/null || true
+  rm -f "$HOME/Library/LaunchAgents/com.contentscheduler.clipear.plist"
+  if [ -f "$PIDFILE" ]; then
+    kill "$(cat "$PIDFILE")" 2>/dev/null || true
+    rm -f "$PIDFILE"
+  fi
+  pkill -f "directo/expres.py" 2>/dev/null || true
+  echo "✓ Servidor 24/7 detenido."
   exit 0
 fi
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-mkdir -p "$HOME/.local/bin"
+mkdir -p "$HOME/.local/bin" "$HOME/Library/Logs"
 
 if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v yt-dlp >/dev/null 2>&1; then
   echo "Instalando ffmpeg y yt-dlp precompilados para Mac con pip (5 segundos, sin Homebrew)…"
@@ -33,53 +37,40 @@ if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v yt-dlp >/dev/null 2>&1; t
   ln -sf "$HOME/.local/clipear-venv/bin/yt-dlp" "$HOME/.local/bin/yt-dlp"
 fi
 
-
+export CAMARA="${CAMARA:-arriba-derecha}"
+export DRIVE_SUBIR=true
+export DRIVE_BORRAR_LOCAL=true
 
 if [ "${1:-}" = "--servicio" ]; then
   shift
   if [ "$#" -gt 0 ]; then
     printf '%s\n' "$@" > directo/canales.txt
   fi
-  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
-  cat > "$PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>$ETIQUETA</string>
-  <key>WorkingDirectory</key><string>$RAIZ</string>
-  <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-    <key>CAMARA</key><string>${CAMARA:-arriba-derecha}</string>
-    <key>DRIVE_SUBIR</key><string>true</string>
-    <key>DRIVE_BORRAR_LOCAL</key><string>true</string>
-  </dict>
-  <key>ProgramArguments</key><array>
-    <string>/usr/bin/caffeinate</string>
-    <string>-dimsu</string>
-    <string>/usr/bin/env</string>
-    <string>python3</string>
-    <string>$RAIZ/directo/expres.py</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>$LOG</string>
-  <key>StandardErrorPath</key><string>$LOG</string>
-</dict></plist>
-EOF
-  launchctl bootout "gui/$(id -u)/$ETIQUETA" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$PLIST"
-  echo "✓ Servidor de clipping activo 24/7 en segundo plano (aunque cierres la Terminal)."
-  echo "  • El iMac no se dormirá mientras esté activo (caffeinate)."
-  echo "  • Si se cae o reinicias el Mac, arranca solo."
+  # Quitar LaunchAgent viejo (macOS TCC bloquea ~/Desktop en LaunchAgents)
+  launchctl bootout "gui/$(id -u)/com.contentscheduler.clipear" 2>/dev/null || true
+  rm -f "$HOME/Library/LaunchAgents/com.contentscheduler.clipear.plist"
+  pkill -f "directo/expres.py" 2>/dev/null || true
+
+  # Bucle en segundo plano con nohup + caffeinate (hereda el permiso de Terminal sobre ~/Desktop)
+  nohup /usr/bin/caffeinate -dimsu bash -c '
+    while true; do
+      python3 "'"$RAIZ"'/directo/expres.py" >> "'"$LOG"'" 2>&1 || true
+      sleep 2
+    done
+  ' >/dev/null 2>&1 &
+  echo $! > "$PIDFILE"
+
+  for _ in $(seq 1 15); do
+    if curl -fsS http://127.0.0.1:8090/api/estado >/dev/null 2>&1; then break; fi
+    sleep 1
+  done
+
+  echo "✓ Servidor de clipping activo 24/7 en segundo plano."
   echo "  • Panel local:  http://localhost:8090"
   echo "  • Ver registro: tail -f $LOG"
   echo "  • Pararlo:      ./clipear.sh --parar"
+  open "http://localhost:8090" 2>/dev/null || true
   exit 0
 fi
 
-export CAMARA="${CAMARA:-arriba-derecha}"
-export DRIVE_SUBIR=true
-export DRIVE_BORRAR_LOCAL=true
-
-# caffeinate evita que el iMac se duerma mientras vigila y clipea
 exec caffeinate -dimsu python3 directo/expres.py "$@"
