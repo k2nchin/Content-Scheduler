@@ -359,14 +359,16 @@ def _token_google() -> str | None:
     if not cred_path.is_file():
         return None
     d = json.loads(cred_path.read_text())
+    form = {
+        "client_id": d["client_id"],
+        "refresh_token": d["refresh_token"],
+        "grant_type": "refresh_token",
+    }
+    if d.get("client_secret"):
+        form["client_secret"] = d["client_secret"]
     req = urllib.request.Request(
         "https://oauth2.googleapis.com/token",
-        data=urllib.parse.urlencode({
-            "client_id": d["client_id"],
-            "client_secret": d["client_secret"],
-            "refresh_token": d["refresh_token"],
-            "grant_type": "refresh_token",
-        }).encode(),
+        data=urllib.parse.urlencode(form).encode(),
     )
     with urllib.request.urlopen(req, timeout=20) as r:
         return json.load(r)["access_token"]
@@ -569,18 +571,9 @@ def subir_a_drive_y_borrar(clip: Path, extra_borrar: Path | None, canal: str) ->
         log(canal, "⚠️ Falta autorizar Drive (python3 drive/autorizar.py). Conservo el clip en el Mac.")
         return
     try:
-        d = json.loads(cred_path.read_text())
-        req = urllib.request.Request(
-            "https://oauth2.googleapis.com/token",
-            data=urllib.parse.urlencode({
-                "client_id": d["client_id"],
-                "client_secret": d["client_secret"],
-                "refresh_token": d["refresh_token"],
-                "grant_type": "refresh_token",
-            }).encode(),
-        )
-        with urllib.request.urlopen(req, timeout=20) as r:
-            token = json.load(r)["access_token"]
+        token = _token_google()
+        if not token:
+            return
         raiz = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip() or _drive_carpeta(token, "Content Scheduler")
         carpeta = _drive_carpeta(token, canal, raiz)
         boundary = f"===expres{int(time.time()*1000)}==="
@@ -1006,9 +999,13 @@ async function borrar(ruta){
   vistos=''; cargar();
 }
 async function conectarMeta(){
-  const t = prompt('Pega tu Token de Usuario o de Página de Meta (developers.facebook.com → Graph API Explorer con permisos pages_manage_posts, instagram_content_publish):');
+  const scope = 'pages_show_list,pages_read_engagement,pages_manage_posts,business_management,instagram_basic,instagram_content_publish,pages_read_user_content,pages_manage_engagement,instagram_manage_comments';
+  window.open('https://www.facebook.com/v21.0/dialog/oauth?client_id=1611404507348655&redirect_uri=https://www.facebook.com/connect/login_success.html&response_type=token&scope='+scope,'_blank');
+  const t = prompt('Se abrió Facebook con la app de Content Scheduler (1611404507348655). Autoriza y pega aquí la URL final (o el access_token):');
   if(!t) return;
-  const r = await fetch('/api/meta?token='+encodeURIComponent(t.trim()),{method:'POST'});
+  const m = t.match(/access_token=([^&]+)/);
+  const tk = m ? decodeURIComponent(m[1]) : t.trim();
+  const r = await fetch('/api/meta?token='+encodeURIComponent(tk),{method:'POST'});
   const d = await r.json();
   alert(d.ok ? `Conectado: ${d.info.page_name}` + (d.info.ig_username ? ` + @${d.info.ig_username}` : '') : ('Error: '+d.error));
 }
@@ -1064,6 +1061,31 @@ class Web(http.server.BaseHTTPRequestHandler):
                 threading.Thread(target=vigilar_canal, args=(u,), name=nombre_de(u), daemon=True).start()
             self.send_response(204)
             self.end_headers()
+            return
+        if self.path.startswith("/api/credenciales-ios"):
+            n = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(n).decode() or "{}")
+            cred_dir = Path(__file__).resolve().parent.parent / "drive" / "credenciales"
+            cred_dir.mkdir(parents=True, exist_ok=True)
+            if body.get("google_refresh_token") and body.get("google_client_id"):
+                (cred_dir / "usuario.json").write_text(json.dumps({
+                    "client_id": body["google_client_id"],
+                    "client_secret": "",
+                    "refresh_token": body["google_refresh_token"],
+                    "scope": "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/youtube.upload",
+                }, indent=2))
+            if body.get("meta_page_id") and body.get("meta_page_token"):
+                META_FILE.write_text(json.dumps({
+                    "page_id": body["meta_page_id"],
+                    "page_name": body.get("meta_page_name", "Página"),
+                    "page_token": body["meta_page_token"],
+                    "ig_id": body.get("meta_ig_id", ""),
+                    "ig_username": body.get("meta_ig_username", ""),
+                }, indent=2, ensure_ascii=False))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"ok":true}')
             return
         if self.path.startswith("/api/meta"):
             tk = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("token", [""])[0].strip()

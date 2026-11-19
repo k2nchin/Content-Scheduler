@@ -75,7 +75,7 @@ def credenciales():
                 None,
                 refresh_token=datos["refresh_token"],
                 client_id=datos["client_id"],
-                client_secret=datos["client_secret"],
+                client_secret=datos.get("client_secret") or None,
                 token_uri="https://oauth2.googleapis.com/token",
                 scopes=[concedido],
             )
