@@ -33,10 +33,7 @@ if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v yt-dlp >/dev/null 2>&1; t
   ln -sf "$HOME/.local/clipear-venv/bin/yt-dlp" "$HOME/.local/bin/yt-dlp"
 fi
 
-if [ ! -f drive/credenciales/usuario.json ]; then
-  echo "=== Paso único: autorizar tu cuenta de Google Drive ==="
-  python3 drive/autorizar.py
-fi
+
 
 if [ "${1:-}" = "--servicio" ]; then
   shift

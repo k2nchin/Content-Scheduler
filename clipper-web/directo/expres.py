@@ -982,6 +982,7 @@ button.sec{background:var(--bg2);border:1px solid var(--line)}
 <form class="add" onsubmit="agregar(event)">
   <input id="url" placeholder="Pega un directo o canal en vivo (https://kick.com/..., https://twitch.tv/..., https://youtube.com/@...)" required>
   <button type="submit">+ Vigilar directo</button>
+  <button type="button" class="sec" onclick="conectarGoogle()">🔗 Conectar Google / YT</button>
   <button type="button" class="sec" onclick="conectarMeta()">🔗 Conectar FB / IG</button>
 </form>
 <div id="lista" class="grid"></div>
@@ -999,6 +1000,7 @@ async function borrar(ruta){
   await fetch('/api/borrar?ruta='+encodeURIComponent(decodeURI(ruta)),{method:'POST'});
   vistos=''; cargar();
 }
+async function conectarGoogle(){await fetch('/api/google',{method:'POST'});}
 async function conectarMeta(){
   const scope = 'pages_show_list,pages_read_engagement,pages_manage_posts,business_management,instagram_basic,instagram_content_publish,pages_read_user_content,pages_manage_engagement,instagram_manage_comments';
   window.open('https://www.facebook.com/v21.0/dialog/oauth?client_id=1611404507348655&redirect_uri=https://www.facebook.com/connect/login_success.html&response_type=token&scope='+scope,'_blank');
@@ -1087,6 +1089,12 @@ class Web(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(b'{"ok":true}')
+            return
+        if self.path.startswith("/api/google"):
+            autorizar_py = Path(__file__).resolve().parent.parent / "drive" / "autorizar.py"
+            subprocess.Popen([sys.executable, str(autorizar_py)])
+            self.send_response(204)
+            self.end_headers()
             return
         if self.path.startswith("/api/meta"):
             tk = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("token", [""])[0].strip()

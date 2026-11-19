@@ -84,82 +84,92 @@ class Recogida(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def instalar_receptor_esquema(scheme: str, puerto: int) -> Path | None:
+def abrir_ventana_oauth_mac(url: str, scheme: str) -> str | None:
+    """Abre una ventana nativa de macOS (WKWebView) que captura directamente el
+    redirect com.googleusercontent.apps... sin depender de Chrome/Safari ni de
+    LaunchServices."""
     if sys.platform != "darwin" or not shutil.which("swiftc"):
         return None
-    base_dir = Path.home() / "Applications" / ".cs-oauth-helper"
-    shutil.rmtree(base_dir, ignore_errors=True)
-    app_dir = base_dir / "CSAuth.app" / "Contents"
-    (app_dir / "MacOS").mkdir(parents=True)
-    (app_dir / "Info.plist").write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>com.contentscheduler.oauthhelper</string>
-  <key>CFBundleName</key><string>ContentSchedulerAuth</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleExecutable</key><string>helper</string>
-  <key>LSUIElement</key><true/>
-  <key>CFBundleURLTypes</key><array><dict>
-    <key>CFBundleURLName</key><string>GoogleOAuth</string>
-    <key>CFBundleURLSchemes</key><array><string>{scheme}</string></array>
-  </dict></array>
-</dict></plist>""")
-    swift_src = base_dir / "helper.swift"
-    swift_src.write_text(f"""import AppKit
-class D: NSObject, NSApplicationDelegate {{
-    func send(_ u: URL) {{
-        let q = u.query ?? ""
-        if let t = URL(string: "http://127.0.0.1:{puerto}/?" + q) {{
-            let sem = DispatchSemaphore(value: 0)
-            URLSession.shared.dataTask(with: t) {{ _,_,_ in sem.signal() }}.resume()
-            _ = sem.wait(timeout: .now() + 5)
-        }}
-        NSApp.terminate(nil)
-    }}
-    func applicationWillFinishLaunching(_ n: Notification) {{
-        NSAppleEventManager.shared().setEventHandler(
-            self,
-            andSelector: #selector(handleURLEvent(_:withReplyEvent:)),
-            forEventClass: AEEventClass(kInternetEventClass),
-            andEventID: AEEventID(kAEGetURL)
+    tmp = Path(tempfile.mkdtemp(prefix="cs-wv-"))
+    src = tmp / "wv.swift"
+    bin_p = tmp / "wv"
+    src.write_text("""import AppKit
+import WebKit
+
+let args = CommandLine.arguments
+let authURL = URL(string: args[1])!
+let targetScheme = args[2]
+
+class Handler: NSObject, NSApplicationDelegate, WKNavigationDelegate, NSWindowDelegate {
+    var win: NSWindow!
+    var web: WKWebView!
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        win = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 680),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered, defer: false
         )
-    }}
-    @objc func handleURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent: NSAppleEventDescriptor) {{
-        if let s = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
-           let u = URL(string: s) {{ send(u) }}
-    }}
-    func application(_ application: NSApplication, open urls: [URL]) {{
-        if let u = urls.first {{ send(u) }}
-    }}
-}}
+        win.title = "Conectar cuenta — Content Scheduler"
+        win.center()
+        win.delegate = self
+        let cfg = WKWebViewConfiguration()
+        web = WKWebView(frame: win.contentView!.bounds, configuration: cfg)
+        web.autoresizingMask = [.width, .height]
+        web.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+        web.navigationDelegate = self
+        win.contentView?.addSubview(web)
+        win.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        web.load(URLRequest(url: authURL))
+    }
+
+    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        if let u = navigationAction.request.url, u.scheme == targetScheme {
+            print("REDIRECT_URL=" + u.absoluteString)
+            fflush(stdout)
+            decisionHandler(.cancel)
+            NSApp.terminate(nil)
+            return
+        }
+        decisionHandler(.allow)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        NSApp.terminate(nil)
+    }
+}
+
 let app = NSApplication.shared
-let d = D()
-app.delegate = d
+let h = Handler()
+app.delegate = h
 app.run()
 """)
-    r = subprocess.run(["swiftc", str(swift_src), "-o", str(app_dir / "MacOS" / "helper")], capture_output=True)
+    r = subprocess.run(["swiftc", str(src), "-framework", "AppKit", "-framework", "WebKit", "-o", str(bin_p)], capture_output=True)
     if r.returncode != 0:
+        shutil.rmtree(tmp, ignore_errors=True)
         return None
-    subprocess.run(["codesign", "--force", "--deep", "-s", "-", str(app_dir.parent)], capture_output=True)
-    lsreg = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-    subprocess.run([lsreg, "-f", str(app_dir.parent)], capture_output=True)
-    return base_dir
+    out = subprocess.run([str(bin_p), url, scheme], capture_output=True, text=True)
+    shutil.rmtree(tmp, ignore_errors=True)
+    m = re.search(r"REDIRECT_URL=(\S+)", out.stdout)
+    if not m:
+        return None
+    q = urllib.parse.parse_qs(urllib.parse.urlparse(m.group(1)).query)
+    return (q.get("code") or [None])[0]
 
 
 def autorizar_uno(permiso: str, salida: Path, etiqueta: str) -> int:
     secreto = ""
+    cliente = leer_ios_client_id()
+    scheme = ".".join(reversed(cliente.split(".")))
+    destino = f"{scheme}:/oauth2redirect"
     if CLIENTE.is_file():
         datos = json.loads(CLIENTE.read_text())
         conf = datos.get("installed") or datos.get("web") or {}
-        cliente, secreto = conf.get("client_id", ""), conf.get("client_secret", "")
-        destino = f"http://localhost:{PUERTO}"
-        tmp_app = None
-    else:
-        cliente = leer_ios_client_id()
-        scheme = ".".join(reversed(cliente.split(".")))
-        destino = f"{scheme}:/oauth2redirect"
-        tmp_app = instalar_receptor_esquema(scheme, PUERTO)
-        print(f"[{etiqueta}] Usando las credenciales de Content Scheduler ({cliente[:24]}…)")
+        if conf.get("client_id") and conf.get("client_secret"):
+            cliente, secreto = conf["client_id"], conf["client_secret"]
+            destino = f"http://localhost:{PUERTO}"
 
     verifier = base64.urlsafe_b64encode(os.urandom(40)).decode().rstrip("=")
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
@@ -177,42 +187,21 @@ def autorizar_uno(permiso: str, salida: Path, etiqueta: str) -> int:
         "state": Recogida.estado,
     })
 
-    servidor = http.server.HTTPServer(("127.0.0.1", PUERTO), Recogida)
-    servidor.timeout = 1
-    parar_srv = threading.Event()
+    if not secreto and sys.platform == "darwin":
+        print(f"[{etiqueta}] Abriendo ventana de Content Scheduler para conectar tu cuenta…")
+        Recogida.codigo = abrir_ventana_oauth_mac(url, scheme)
 
-    def escuchar():
-        while not parar_srv.is_set() and not Recogida.codigo:
-            servidor.handle_request()
-
-    hilo = threading.Thread(target=escuchar, daemon=True)
-    hilo.start()
-
-    def leer_consola():
-        try:
-            linea = sys.stdin.readline().strip()
-            if linea and not Recogida.codigo:
-                m = re.search(r"[?&]code=([^&\s]+)", linea)
-                Recogida.codigo = urllib.parse.unquote(m.group(1)) if m else linea
-        except Exception:
-            pass
-
-    threading.Thread(target=leer_consola, daemon=True).start()
-
-    print(f"\nAbriendo Google para autorizar {etiqueta}:")
-    print("  1. Entra con tu cuenta y dale a «Permitir» (si el navegador pregunta «¿Abrir ContentSchedulerAuth?», dile que Sí).")
-    print("  2. (Opcional) Si el navegador no vuelve solo, abre F12 → Red/Network o copia el enlace com.googleusercontent... y pégalo aquí + Enter.\n")
-    webbrowser.open(url)
-    for _ in range(180):
-        if Recogida.codigo:
-            break
-        time.sleep(1)
-    parar_srv.set()
-    servidor.server_close()
-    if tmp_app:
-        shutil.rmtree(tmp_app, ignore_errors=True)
     if not Recogida.codigo:
-        print("Cancelado.")
+        servidor = http.server.HTTPServer(("127.0.0.1", PUERTO), Recogida)
+        servidor.timeout = 180
+        hilo = threading.Thread(target=servidor.handle_request, daemon=True)
+        hilo.start()
+        webbrowser.open(url)
+        hilo.join(timeout=180)
+        servidor.server_close()
+
+    if not Recogida.codigo:
+        print(f"No se completó {etiqueta}.")
         return 1
 
     form = {
@@ -244,7 +233,7 @@ def autorizar_uno(permiso: str, salida: Path, etiqueta: str) -> int:
         "scope": permiso,
     }, indent=2))
     os.chmod(salida, 0o600)
-    print(f"✓ {etiqueta} guardado en {salida}")
+    print(f"✓ {etiqueta} conectado y guardado en {salida}")
     return 0
 
 
