@@ -30,8 +30,9 @@ CLIENTE = AQUI / "credenciales" / "cliente-oauth.json"
 SALIDA = AQUI / "credenciales" / "usuario.json"
 XCCONFIG = AQUI.parent.parent / "ios" / "Config.xcconfig"
 
-SOLO_LO_SUYO = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/youtube.upload"
-TODO_EL_DRIVE = "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/youtube.upload"
+SOLO_LO_SUYO = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly openid email"
+TODO_EL_DRIVE = "https://www.googleapis.com/auth/drive"
+SCOPE_YOUTUBE = "https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.force-ssl"
 PUERTO = 8765
 
 
@@ -127,8 +128,7 @@ app.run()
     return app_dir.parent.parent
 
 
-def main() -> int:
-    permiso, _ = alcance()
+def autorizar_uno(permiso: str, salida: Path, etiqueta: str) -> int:
     secreto = ""
     if CLIENTE.is_file():
         datos = json.loads(CLIENTE.read_text())
@@ -141,10 +141,11 @@ def main() -> int:
         scheme = ".".join(reversed(cliente.split(".")))
         destino = f"{scheme}:/oauth2redirect"
         tmp_app = instalar_receptor_esquema(scheme, PUERTO)
-        print(f"Usando las mismas credenciales de Content Scheduler ({cliente[:24]}…)")
+        print(f"[{etiqueta}] Usando las credenciales de Content Scheduler ({cliente[:24]}…)")
 
     verifier = base64.urlsafe_b64encode(os.urandom(40)).decode().rstrip("=")
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    Recogida.codigo = None
     Recogida.estado = secrets.token_urlsafe(16)
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
         "client_id": cliente,
@@ -163,9 +164,10 @@ def main() -> int:
     hilo = threading.Thread(target=servidor.handle_request, daemon=True)
     hilo.start()
 
-    print("\nAbriendo Google en el navegador: entra con tu cuenta de Google y dale a Permitir.\n")
+    print(f"\nAbriendo Google para autorizar {etiqueta}: entra con tu cuenta y dale a Permitir.\n")
     webbrowser.open(url)
     hilo.join(timeout=185)
+    servidor.server_close()
     if tmp_app:
         shutil.rmtree(tmp_app, ignore_errors=True)
 
@@ -199,15 +201,29 @@ def main() -> int:
         print("Google rechazó el código:", e.read().decode())
         return 1
 
-    SALIDA.parent.mkdir(parents=True, exist_ok=True)
-    SALIDA.write_text(json.dumps({
+    salida.parent.mkdir(parents=True, exist_ok=True)
+    salida.write_text(json.dumps({
         "client_id": cliente,
         "client_secret": secreto,
         "refresh_token": tok["refresh_token"],
         "scope": permiso,
     }, indent=2))
-    os.chmod(SALIDA, 0o600)
-    print(f"✓ Guardado en {SALIDA} (Drive + YouTube listos con las credenciales de Content Scheduler).")
+    os.chmod(salida, 0o600)
+    print(f"✓ {etiqueta} guardado en {salida}")
+    return 0
+
+
+def main() -> int:
+    yt_salida = AQUI / "credenciales" / "youtube.json"
+    if "--youtube" in sys.argv:
+        return autorizar_uno(SCOPE_YOUTUBE, yt_salida, "YouTube")
+    permiso, _ = alcance()
+    rc = autorizar_uno(permiso, SALIDA, "Google Drive")
+    if rc != 0:
+        return rc
+    if not yt_salida.is_file():
+        print("\nAhora autoriza tu canal de YouTube (Google exige pedirlo en una segunda ventana):")
+        autorizar_uno(SCOPE_YOUTUBE, yt_salida, "YouTube")
     return 0
 
 

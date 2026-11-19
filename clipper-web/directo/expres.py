@@ -354,8 +354,9 @@ def titulo_ia(motivo: str, mensajes_recientes: list[str]) -> str | None:
 META_FILE = Path(__file__).resolve().parent.parent / "drive" / "credenciales" / "meta.json"
 
 
-def _token_google() -> str | None:
-    cred_path = Path(__file__).resolve().parent.parent / "drive" / "credenciales" / "usuario.json"
+def _token_google(archivo: str = "usuario.json") -> str | None:
+    base = Path(__file__).resolve().parent.parent / "drive" / "credenciales"
+    cred_path = base / archivo if (base / archivo).is_file() else base / "usuario.json"
     if not cred_path.is_file():
         return None
     d = json.loads(cred_path.read_text())
@@ -376,7 +377,7 @@ def _token_google() -> str | None:
 
 def publicar_youtube(clip: Path, titulo: str, privacidad: str = "public") -> str:
     """Sube el clip 9:16 como YouTube Short con la misma cuenta autorizada en Google."""
-    token = _token_google()
+    token = _token_google("youtube.json")
     if not token:
         raise RuntimeError("Falta autorizar Google (python3 drive/autorizar.py)")
     t_short = (titulo if "#shorts" in titulo.lower() else f"{titulo} #Shorts")[:95]
