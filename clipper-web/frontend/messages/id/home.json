@@ -69,10 +69,6 @@
     "original": {
       "label": "Asli",
       "hint": "Pertahankan rasio aspek sumber"
-    },
-    "vertical_streamer": {
-      "label": "Streamer (cam + game)",
-      "hint": "Rounded facecam on top, gameplay below"
     }
   },
   "captions": "Caption",

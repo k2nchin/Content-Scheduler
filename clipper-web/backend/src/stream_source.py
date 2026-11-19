@@ -198,40 +198,6 @@ def detect_stream_source(url: str) -> tuple[str, str, str]:
     raise ValueError(UNSUPPORTED_SOURCE_MESSAGE)
 
 
-def live_channel_source(url: str) -> Optional[str]:
-    """``"twitch"``/``"kick"``/``"youtube"`` if this is a stream in progress, else None.
-
-    ``detect_stream_source`` refuses a channel URL because a stream that has not
-    ended cannot be clipped in one pass. Recording it in chunks can, so this
-    tells the two cases apart without a second copy of the URL rules.
-    """
-    from .youtube_utils import _is_youtube_host, get_youtube_video_id
-
-    if get_youtube_video_id(url):
-        return "youtube"
-    # A channel's current stream has no video id in the URL: youtube.com/@name/live,
-    # /channel/<id>/live, /c/<name>/live, /user/<name>/live. yt-dlp resolves them.
-    try:
-        parsed = urlparse(str(url).strip())
-    except (TypeError, ValueError):
-        return None
-    if (
-        parsed.scheme in {"http", "https"}
-        and _is_youtube_host(parsed.hostname or "")
-        and [part for part in parsed.path.split("/") if part][-1:] == ["live"]
-    ):
-        return "youtube"
-    try:
-        detect_stream_source(url)
-    except ValueError as error:
-        if str(error) != LIVE_MESSAGE:
-            return None
-        host = (urlparse(str(url).strip()).hostname or "").lower().removeprefix("www.")
-        return "kick" if host == "kick.com" else "twitch"
-    # A VOD or a clip: already finished, so it is not a live.
-    return None
-
-
 def _provider_order(source: str, config=None) -> list[str]:
     config = config or get_config()
     providers = [

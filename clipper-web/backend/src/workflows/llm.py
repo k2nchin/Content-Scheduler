@@ -42,10 +42,6 @@ MAX_REPAIRABLE_ISSUES = 15
 MAX_OUTPUT_TOKENS = 32000
 _AGENT_CACHE_SIZE = 48
 _agents: "OrderedDict[tuple, Agent]" = OrderedDict()
-# How to build each cached agent again, for when its Gemini key runs out of
-# quota and the next key has to take over mid-call. Kept alongside the cache so
-# an evicted agent takes its entry with it.
-_agent_rebuilds: "dict[int, Callable[[], Agent]]" = {}
 
 
 def model_name(*, structural: bool) -> str:
@@ -90,12 +86,8 @@ def build_agent(output_type: type[T], system_prompt: str, *, structural: bool) -
         model_settings={"max_tokens": MAX_OUTPUT_TOKENS, "timeout": CALL_TIMEOUT_SECONDS} if native else None,
     )
     _agents[signature] = agent
-    _agent_rebuilds[id(agent)] = lambda: build_agent(
-        output_type, system_prompt, structural=structural
-    )
     while len(_agents) > _AGENT_CACHE_SIZE:
-        _, evicted = _agents.popitem(last=False)
-        _agent_rebuilds.pop(id(evicted), None)
+        _agents.popitem(last=False)
     return agent
 
 
@@ -162,12 +154,7 @@ async def run(
     """One model call through the shared runner; usage is recorded per stage."""
     started = time.monotonic()
     try:
-        # Only agents this module built can be built again; an agent from
-        # anywhere else just runs without the key-swap retry.
-        again = _agent_rebuilds.get(id(agent))
-        result = await ai._run_transcript_analysis(
-            agent, prompt, timeout, **({"rebuild": again} if again else {})
-        )
+        result = await ai._run_transcript_analysis(agent, prompt, timeout)
     except Exception:
         if stats is not None:
             stats.record(stage, None, time.monotonic() - started, failed=True)

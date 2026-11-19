@@ -46,7 +46,7 @@ def find_reactor_face(width: int, height: int, samples: Sequence[FaceFrame]) -> 
                 continue
             found.append(corner[0])
             other_count += any(f not in corner and f[1] + f[3] / 2 > height * .3 for f in faces)
-        if len(found) < len(samples) * .75:
+        if len(found) < len(samples) * .75 or other_count < len(samples) * .3:
             continue
         boxes = np.asarray(found)
         centres = boxes[:, :2] + boxes[:, 2:] / 2
@@ -188,20 +188,10 @@ def build_reaction_layout(
     rx = clamp_even(int(face[0] + face[2] / 2 - rw / 2), int(ix), int(ix + iw - rw))
     ry = clamp_even(int(face[1] + face[3] / 2 - rh * .44), int(iy), int(iy + ih - rh))
     # Remove the inset from the source background too, avoiding a ghost copy.
-    r = 36
-    rounded = (
-        f"if(lt(X,{r})*lt(Y,{r}),if(lte(hypot({r}-X,{r}-Y),{r}),255,0),"
-        f"if(gt(X,W-{r})*lt(Y,{r}),if(lte(hypot(X-(W-{r}),{r}-Y),{r}),255,0),"
-        f"if(lt(X,{r})*gt(Y,H-{r}),if(lte(hypot({r}-X,Y-(H-{r})),{r}),255,0),"
-        f"if(gt(X,W-{r})*gt(Y,H-{r}),if(lte(hypot(X-(W-{r}),Y-(H-{r})),{r}),255,0),255))))"
-    )
     graph = [
         '[0:v]split=3[reactor_src][source_bg][source_src]',
-        f'[reactor_src]crop={rw}:{rh}:{rx}:{ry},split=2[rbg_src][rcam_src]',
-        f'[rbg_src]scale=270:160:force_original_aspect_ratio=increase,crop=270:160,gblur=sigma=18:steps=2,scale=1080:{REACTOR_HEIGHT},setsar=1[rbg]',
-        f'[rcam_src]scale=560:520:force_original_aspect_ratio=increase,crop=560:520,{UPSCALE_SHARPEN_FILTER},format=yuva420p,'
-        f"geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='{rounded}'[rcam]",
-        '[rbg][rcam]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p,setsar=1[reactor]',
+        f'[reactor_src]crop={rw}:{rh}:{rx}:{ry},scale=1080:{REACTOR_HEIGHT}:flags=lanczos,'
+        f'{UPSCALE_SHARPEN_FILTER},setsar=1[reactor]',
         f'[source_bg]drawbox=x={int(ix)}:y=0:w={int(iw)}:h={int(ih)}:color=black:t=fill,'
         'scale=540:640:force_original_aspect_ratio=increase,crop=540:640,'
         f'gblur=sigma=18:steps=2,scale=1080:{SOURCE_HEIGHT},setsar=1[base0]',
@@ -292,34 +282,3 @@ def choose_reaction_layout(
     if inset is None:
         return None
     return build_reaction_layout(width, height, duration, face, inset, samples, scene_cuts)
-
-
-def build_streamer_layout(
-    path: Path, width: int, height: int, duration: float, samples: Sequence[FaceFrame],
-    scene_cuts: Sequence[float] = (),
-) -> Dict[str, Any]:
-    """Formato streamer: cámara redondeada arriba + juego abajo + fondo difuminado.
-    Si detecta la cara y el borde de la webcam los usa; si no, busca cualquier
-    cara en una esquina o toma la esquina superior derecha típica de OBS."""
-    chosen = choose_reaction_layout(path, width, height, duration, samples, scene_cuts)
-    if chosen:
-        return chosen
-    corners = [
-        f for _, faces in samples for f in faces
-        if (f[0] + f[2] / 2 < width * .38 or f[0] + f[2] / 2 > width * .62)
-        and (f[1] + f[3] / 2 < height * .45 or f[1] + f[3] / 2 > height * .58)
-        and f[2] < width * .35
-    ]
-    if corners:
-        face = tuple(float(v) for v in np.median(np.asarray(corners), axis=0))
-        fx, fy, fw, fh = face
-        iw = min(width * .38, max(width * .22, fw * 2.8))
-        ih = min(height * .45, max(height * .28, fh * 3.2))
-        ix = max(0., min(width - iw, fx + fw / 2 - iw / 2))
-        iy = max(0., min(height - ih, fy + fh / 2 - ih * .42))
-        inset: Box = (ix, iy, iw, ih)
-    else:
-        ix, iy, iw, ih = width * .71, height * .02, width * .27, height * .36
-        inset = (ix, iy, iw, ih)
-        face = (ix + iw * .35, iy + ih * .25, iw * .3, ih * .45)
-    return build_reaction_layout(width, height, max(duration, 1.), face, inset, samples, scene_cuts)

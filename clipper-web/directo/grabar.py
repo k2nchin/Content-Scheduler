@@ -23,7 +23,6 @@ import os
 import subprocess
 import sys
 import time
-import uuid
 from pathlib import Path
 
 import requests
@@ -56,58 +55,45 @@ def cabeceras() -> dict:
     return {"Authorization": f"Bearer {CLAVE}"}
 
 
-def subir_y_clipear(trozo: Path, ajustes: dict | None = None, cabeceras_extra: dict | None = None) -> str | None:
-    """Sube el trozo al motor y le pide los clips. Devuelve el id del trabajo."""
+def subir_y_clipear(trozo: Path) -> None:
+    """Sube el trozo al motor y le pide los clips."""
     log.info("Subiendo %s (%.1f MB)", trozo.name, trozo.stat().st_size / 1e6)
     with trozo.open("rb") as f:
-        r = requests.post(f"{API}/upload", headers={**cabeceras(), **(cabeceras_extra or {})},
+        r = requests.post(f"{API}/upload", headers=cabeceras(),
                           files={"video": (trozo.name, f, "video/mp4")}, timeout=3600)
     if r.status_code >= 300:
         log.error("No se pudo subir: %s %s", r.status_code, r.text[:200])
-        return None
+        return
     referencia = (r.json() or {}).get("video_path")
     if not referencia:
         log.error("El motor no devolvió dónde quedó el archivo.")
-        return None
+        return
 
-    cuerpo = {"source": {"url": referencia}, **(ajustes or OPCIONES)}
-    r = requests.post(f"{API}/tasks/", headers={**cabeceras(), **(cabeceras_extra or {}), "Content-Type": "application/json"},
+    cuerpo = {"source": {"url": referencia}, **OPCIONES}
+    r = requests.post(f"{API}/tasks/", headers={**cabeceras(), "Content-Type": "application/json"},
                       json=cuerpo, timeout=120)
     if r.status_code >= 300:
         log.error("No se pudo encargar el clipeo: %s %s", r.status_code, r.text[:200])
-        return None
-    tid = (r.json() or {}).get("task_id")
-    log.info("Clipeando el trozo: trabajo %s", tid or "?")
-    if os.getenv("BORRAR_TROZO_SUBIDO", "true").lower() != "false":
-        try:
-            trozo.unlink()
-            log.info("Trozo grabado borrado del Mac tras enviarlo al motor: %s", trozo.name)
-        except OSError as e:
-            log.warning("No se pudo borrar el trozo %s: %s", trozo.name, e)
-    return tid
+        return
+    log.info("Clipeando el trozo: trabajo %s", (r.json() or {}).get("task_id", "?"))
 
 
-def grabar(
-    enlace: str,
-    *,
-    minutos: int = MINUTOS,
-    opciones: dict | None = None,
-    debe_parar=None,
-    al_crear_trozo=None,
-) -> int:
-    """Graba el directo por trozos y los va mandando. Devuelve cuántos mandó.
+def main() -> int:
+    if len(sys.argv) < 2:
+        log.error("Dime qué directo grabar:  docker compose run --rm directo <enlace>")
+        return 1
+    enlace = sys.argv[1].strip()
+    if not CLAVE:
+        log.error("Falta CLIP_API_KEY. Sácala con ./scripts/clave-para-el-iphone.sh")
+        return 1
 
-    ``debe_parar`` se consulta cada pocos segundos: devuelve True y la
-    grabación se cierra ordenadamente, mandando el trozo que quedaba.
-    """
-    ajustes = {**OPCIONES, **(opciones or {})}
     CARPETA.mkdir(parents=True, exist_ok=True)
-    # Único aunque empiecen varias grabaciones en el mismo segundo.
-    marca = f"{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:6]}"
+    marca = time.strftime("%Y%m%d-%H%M%S")
     patron = str(CARPETA / f"{marca}_%03d.mp4")
 
     log.info("Grabando %s", enlace)
-    log.info("Trozos de %d minutos. Cada uno se manda a clipear al cerrarse.", minutos)
+    log.info("Trozos de %d minutos. Cada uno se manda a clipear al cerrarse.", MINUTOS)
+    log.info("Ctrl+C para parar. Lo grabado se queda.")
 
     # yt-dlp saca el directo por la salida estándar y ffmpeg lo va cortando en
     # trozos sin recodificar, que es instantáneo y no gasta procesador.
@@ -118,7 +104,7 @@ def grabar(
     )
     corte = subprocess.Popen(
         ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
-         "-c", "copy", "-f", "segment", "-segment_time", str(minutos * 60),
+         "-c", "copy", "-f", "segment", "-segment_time", str(MINUTOS * 60),
          "-reset_timestamps", "1", patron],
         stdin=bajada.stdout,
     )
@@ -133,13 +119,8 @@ def grabar(
             for trozo in trozos[:-1]:
                 if trozo.name not in enviados and trozo.stat().st_size > 1_000_000:
                     enviados.add(trozo.name)
-                    tid = subir_y_clipear(trozo, ajustes)
-                    if tid and al_crear_trozo:
-                        al_crear_trozo(tid)
+                    subir_y_clipear(trozo)
             if corte.poll() is not None:
-                break
-            if debe_parar is not None and debe_parar(len(enviados)):
-                log.info("Parando la grabación a petición.")
                 break
             time.sleep(10)
     except KeyboardInterrupt:
@@ -156,24 +137,9 @@ def grabar(
     # El directo acabó o lo paraste: queda el último trozo por mandar.
     for trozo in sorted(CARPETA.glob(f"{marca}_*.mp4")):
         if trozo.name not in enviados and trozo.stat().st_size > 1_000_000:
-            enviados.add(trozo.name)
-            tid = subir_y_clipear(trozo, ajustes)
-            if tid and al_crear_trozo:
-                al_crear_trozo(tid)
+            subir_y_clipear(trozo)
 
     log.info("Listo. Los clips salen en la app y en la web, trozo por trozo.")
-    return len(enviados)
-
-
-def main() -> int:
-    if len(sys.argv) < 2:
-        log.error("Dime qué directo grabar:  docker compose run --rm directo <enlace>")
-        return 1
-    if not CLAVE:
-        log.error("Falta CLIP_API_KEY. Sácala con ./scripts/clave-para-el-iphone.sh")
-        return 1
-    log.info("Ctrl+C para parar. Lo grabado se queda.")
-    grabar(sys.argv[1].strip())
     return 0
 
 

@@ -24,11 +24,11 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// Nunito es fuente variable en Google Fonts; pasarle una lista de weights
-// rompe el cargador de fuentes de Turbopack en Next.js 15.
+// Nunito: la redonda más cercana a SF Rounded, la tipografía de títulos de Content Scheduler.
 const syne = Nunito({
   variable: "--font-syne",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
 });
 
 const dataFastWebsiteId = process.env.NEXT_PUBLIC_DATAFAST_WEBSITE_ID;
@@ -129,11 +129,8 @@ export default async function RootLayout({
             />
           </>
         ) : null}
-        <Script id="strip-ext-attrs" strategy="beforeInteractive">
-          {`(()=>{const clean=el=>{if(!el||!el.attributes)return;for(const a of [...el.attributes])if(a.name.startsWith('bis_')||a.name.startsWith('__processed_'))el.removeAttribute(a.name)};const sweep=()=>{document.querySelectorAll('*').forEach(clean)};sweep();new MutationObserver(ms=>{for(const m of ms){if(m.type==='attributes')clean(m.target);for(const n of m.addedNodes)if(n.nodeType===1){clean(n);n.querySelectorAll?.('*').forEach(clean)}}}).observe(document.documentElement,{attributes:true,childList:true,subtree:true})})();`}
-        </Script>
       </head>
-      <body suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} ${syne.variable} antialiased`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} ${syne.variable} antialiased`}>
         <ThemeProvider>
           <NextIntlClientProvider locale={locale} messages={messages}>
             <TooltipProvider>

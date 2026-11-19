@@ -68,15 +68,6 @@ done
 
 docker compose up -d >/dev/null 2>&1 || docker-compose up -d >/dev/null 2>&1
 
-# Con Tailscale puesto, la dirección ya es fija y propia: abrir aquí un túnel
-# de Cloudflare la pisaría con una que cambia a cada rato.
-TS="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
-[ -x "\$TS" ] || TS="\$(command -v tailscale 2>/dev/null || true)"
-if [ -n "\$TS" ] && "\$TS" serve status 2>/dev/null | grep -q 'ts.net'; then
-  echo "\$(date '+%F %T')  Tailscale ya da la dirección fija; no abro túnel"
-  while true; do sleep 3600; done
-fi
-
 # El túnel en bucle: si se cae, se vuelve a abrir con dirección nueva.
 while true; do
   LOG="\$(mktemp -t tunel)"

@@ -1848,10 +1848,6 @@ def render_reframed_clip_ffmpeg(
     # for a well-framed closeup, blurred full-frame fit for content shots.
     if output_format == "vertical_fit":
         video_filter, mode = build_full_frame_filter(), "complex"
-    elif output_format == "vertical_streamer" and vertical_plan is None:
-        from .reaction_layout import build_streamer_layout
-        st = build_streamer_layout(input_path, width, height, ffprobe_duration(input_path), analyze_vertical_clip(input_path, analyze_context=False)[2])
-        video_filter, mode = st["video_filter"], "complex"
     elif vertical_plan is not None:
         video_filter, mode = vertical_plan
     else:
@@ -1897,11 +1893,6 @@ def caption_probe_plan(input_path: Path, output_format: str, vertical_plan=None)
     """The same composition as the final render, without subtitles or stock footage."""
     if output_format == "vertical_fit":
         return build_full_frame_filter(), "complex"
-    if output_format == "vertical_streamer" and vertical_plan is None:
-        from .reaction_layout import build_streamer_layout
-        w, h = ffprobe_video_size(input_path)
-        st = build_streamer_layout(input_path, w, h, ffprobe_duration(input_path), analyze_vertical_clip(input_path, analyze_context=False)[2])
-        return st["video_filter"], "complex"
     if output_format in {"vertical_split", "vertical_pan"}:
         plan = detect_speaker_reframe_plan(input_path, output_format)
         if plan and plan["mode"] == "split":

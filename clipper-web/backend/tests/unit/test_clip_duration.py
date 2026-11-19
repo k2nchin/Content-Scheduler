@@ -67,7 +67,7 @@ def test_validation_and_repair_use_the_requested_bounds(preset, start, end):
 async def test_single_and_windowed_analysis_keep_long_clips(monkeypatch, seconds):
     agent = object()
     monkeypatch.setattr(ai, "get_transcript_agent", lambda preset: agent)
-    async def analyze(_agent, prompt, **_):
+    async def analyze(_agent, prompt):
         assert "longer than 120 seconds" in prompt
         return SimpleNamespace(output=ai.TranscriptAnalysis(
             most_relevant_segments=[ai.TranscriptSegment(

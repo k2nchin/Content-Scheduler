@@ -415,17 +415,7 @@ def create_optimized_clip(
             vertical_plan = None
             caption_y = None
             plan_report: Dict[str, Any] = {}
-            if reframe_format == "vertical_streamer":
-                try:
-                    from .media.reaction_layout import build_streamer_layout
-                    from .media.reframing import analyze_vertical_clip
-                    st = build_streamer_layout(source_clip_path, src_w, src_h, ffprobe_duration(source_clip_path), analyze_vertical_clip(source_clip_path, analyze_context=False)[2])
-                    vertical_plan = (st["video_filter"], "complex")
-                    caption_y = st["caption_y"]
-                    plan_report["kind"] = "reaction"
-                except Exception as exc:
-                    logger.warning("Streamer layout planning failed: %s", exc)
-            elif reframe_format == "vertical":
+            if reframe_format == "vertical":
                 if get_config().speaker_framing:
                     try:
                         speaker_turns, speaker_words = build_clip_speaker_turns(

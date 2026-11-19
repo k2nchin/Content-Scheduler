@@ -1,26 +1,23 @@
-"""Autoriza al Mac a subir a TU Google Drive y YouTube con el MISMO Client ID de
-Content Scheduler (ios/Config.xcconfig), sin descargar cliente-oauth.json.
+"""Autoriza al Mac a subir a TU Google Drive, una sola vez.
 
-Si ya tienes drive/credenciales/cliente-oauth.json lo usa; si no, usa el
-GOOGLE_IOS_CLIENT_ID de Content Scheduler con PKCE: se abre Google en tu
-navegador, autorizas y listo.
+Una cuenta de servicio no tiene disco propio en Drive, así que no puede guardar
+archivos. Esto usa tu cuenta: abres el navegador, dices que sí, y el Mac se
+queda con un permiso duradero. Los clips serán tuyos y ocuparán tu espacio.
+
+  cd clipper-web && python3 drive/autorizar.py
+
+Necesita el json de un cliente de OAuth de tipo «Aplicación de escritorio»,
+guardado en drive/credenciales/cliente-oauth.json. Al terminar escribe
+drive/credenciales/usuario.json, que es lo que lee el subidor.
 """
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import http.server
 import json
-import os
-import re
 import secrets
-import shutil
-import subprocess
 import sys
-import tempfile
 import threading
-import time
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -29,23 +26,15 @@ from pathlib import Path
 AQUI = Path(__file__).resolve().parent
 CLIENTE = AQUI / "credenciales" / "cliente-oauth.json"
 SALIDA = AQUI / "credenciales" / "usuario.json"
-XCCONFIG = AQUI.parent.parent / "ios" / "Config.xcconfig"
-
-SOLO_LO_SUYO = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly openid email"
+# El estrecho: la app solo ve lo que ella misma crea. Es el que queremos.
+SOLO_LO_SUYO = "https://www.googleapis.com/auth/drive.file"
+# El amplio: hace falta para escribir en una carpeta que creaste tú a mano.
 TODO_EL_DRIVE = "https://www.googleapis.com/auth/drive"
-SCOPE_YOUTUBE = "https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/youtube.force-ssl"
 PUERTO = 8765
 
 
-def leer_ios_client_id() -> str:
-    if XCCONFIG.is_file():
-        m = re.search(r"GOOGLE_IOS_CLIENT_ID\s*=\s*(\S+)", XCCONFIG.read_text())
-        if m:
-            return m.group(1).strip()
-    return "84783551840-mki8tk5nse0mh4idh09f88gi8csf59f1.apps.googleusercontent.com"
-
-
 def alcance() -> tuple[str, bool]:
+    """El permiso a pedir. Si apuntas a una carpeta tuya, hace falta el amplio."""
     env = AQUI.parent / ".env"
     carpeta = ""
     if env.is_file():
@@ -56,12 +45,14 @@ def alcance() -> tuple[str, bool]:
 
 
 class Recogida(http.server.BaseHTTPRequestHandler):
+    """Se queda con el código que Google devuelve al navegador."""
+
     codigo: str | None = None
     estado: str = ""
 
     def do_GET(self) -> None:  # noqa: N802
         datos = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-        bien = "code" in datos and (not Recogida.estado or datos.get("state", [""])[0] == Recogida.estado)
+        bien = datos.get("state", [""])[0] == Recogida.estado and "code" in datos
         if bien:
             Recogida.codigo = datos["code"][0]
         self.send_response(200)
@@ -81,99 +72,35 @@ class Recogida(http.server.BaseHTTPRequestHandler):
             </div></body></html>""".encode())
 
     def log_message(self, *_args) -> None:
-        pass
+        pass  # sin ruido en la terminal
 
 
-def abrir_ventana_oauth_mac(url: str, scheme: str) -> str | None:
-    """Abre una ventana nativa de macOS (WKWebView) que captura directamente el
-    redirect com.googleusercontent.apps... sin depender de Chrome/Safari ni de
-    LaunchServices."""
-    if sys.platform != "darwin" or not shutil.which("swiftc"):
-        return None
-    tmp = Path(tempfile.mkdtemp(prefix="cs-wv-"))
-    src = tmp / "wv.swift"
-    bin_p = tmp / "wv"
-    src.write_text("""import AppKit
-import WebKit
+def main() -> int:
+    if not CLIENTE.is_file():
+        print("Falta el archivo del cliente de OAuth.\n")
+        print(f"  1. Entra en console.cloud.google.com → tu proyecto")
+        print("  2. APIs y servicios → Credenciales → Crear credenciales")
+        print("  3. ID de cliente de OAuth → Aplicación de escritorio → Crear")
+        print("  4. Descarga el json y guárdalo como:")
+        print(f"     {CLIENTE}")
+        return 1
 
-let args = CommandLine.arguments
-let authURL = URL(string: args[1])!
-let targetScheme = args[2]
+    datos = json.loads(CLIENTE.read_text())
+    conf = datos.get("installed") or datos.get("web") or {}
+    cliente, secreto = conf.get("client_id"), conf.get("client_secret")
+    if not cliente or not secreto:
+        print("Ese json no parece de un cliente de escritorio. Vuelve a bajarlo.")
+        return 1
 
-class Handler: NSObject, NSApplicationDelegate, WKNavigationDelegate, NSWindowDelegate {
-    var win: NSWindow!
-    var web: WKWebView!
+    permiso, amplio = alcance()
+    if amplio:
+        print("Vas a dar acceso a tu Drive entero, porque le indicaste una carpeta")
+        print("que creaste tú a mano. Si prefieres el permiso mínimo, deja vacío")
+        print("GOOGLE_DRIVE_FOLDER_ID en el .env y la app se hará su carpeta.\n")
+    else:
+        print("Permiso mínimo: la app solo verá los archivos que ella cree.\n")
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
-        win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 680),
-            styleMask: [.titled, .closable, .resizable],
-            backing: .buffered, defer: false
-        )
-        win.title = "Conectar cuenta — Content Scheduler"
-        win.center()
-        win.delegate = self
-        let cfg = WKWebViewConfiguration()
-        web = WKWebView(frame: win.contentView!.bounds, configuration: cfg)
-        web.autoresizingMask = [.width, .height]
-        web.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
-        web.navigationDelegate = self
-        win.contentView?.addSubview(web)
-        win.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        web.load(URLRequest(url: authURL))
-    }
-
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        if let u = navigationAction.request.url, u.scheme == targetScheme {
-            print("REDIRECT_URL=" + u.absoluteString)
-            fflush(stdout)
-            decisionHandler(.cancel)
-            NSApp.terminate(nil)
-            return
-        }
-        decisionHandler(.allow)
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        NSApp.terminate(nil)
-    }
-}
-
-let app = NSApplication.shared
-let h = Handler()
-app.delegate = h
-app.run()
-""")
-    r = subprocess.run(["swiftc", str(src), "-framework", "AppKit", "-framework", "WebKit", "-o", str(bin_p)], capture_output=True)
-    if r.returncode != 0:
-        shutil.rmtree(tmp, ignore_errors=True)
-        return None
-    out = subprocess.run([str(bin_p), url, scheme], capture_output=True, text=True)
-    shutil.rmtree(tmp, ignore_errors=True)
-    m = re.search(r"REDIRECT_URL=(\S+)", out.stdout)
-    if not m:
-        return None
-    q = urllib.parse.parse_qs(urllib.parse.urlparse(m.group(1)).query)
-    return (q.get("code") or [None])[0]
-
-
-def autorizar_uno(permiso: str, salida: Path, etiqueta: str) -> int:
-    secreto = ""
-    cliente = leer_ios_client_id()
-    scheme = ".".join(reversed(cliente.split(".")))
-    destino = f"{scheme}:/oauth2redirect"
-    if CLIENTE.is_file():
-        datos = json.loads(CLIENTE.read_text())
-        conf = datos.get("installed") or datos.get("web") or {}
-        if conf.get("client_id") and conf.get("client_secret"):
-            cliente, secreto = conf["client_id"], conf["client_secret"]
-            destino = f"http://localhost:{PUERTO}"
-
-    verifier = base64.urlsafe_b64encode(os.urandom(40)).decode().rstrip("=")
-    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
-    Recogida.codigo = None
+    destino = f"http://localhost:{PUERTO}"
     Recogida.estado = secrets.token_urlsafe(16)
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
         "client_id": cliente,
@@ -181,75 +108,69 @@ def autorizar_uno(permiso: str, salida: Path, etiqueta: str) -> int:
         "response_type": "code",
         "scope": permiso,
         "access_type": "offline",
-        "prompt": "select_account consent",
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
+        "prompt": "consent",          # obliga a devolver el permiso duradero
         "state": Recogida.estado,
     })
 
-    if not secreto and sys.platform == "darwin":
-        print(f"[{etiqueta}] Abriendo ventana de Content Scheduler para conectar tu cuenta…")
-        Recogida.codigo = abrir_ventana_oauth_mac(url, scheme)
+    servidor = http.server.HTTPServer(("localhost", PUERTO), Recogida)
+    threading.Thread(target=servidor.handle_request, daemon=True).start()
+
+    print("Se va a abrir el navegador. Entra con la cuenta de Google donde")
+    print("quieres que se guarden los clips y dale a Permitir.\n")
+    print("Si ves un aviso de que la app no está verificada:")
+    print("   Configuración avanzada → Ir a … (no seguro)\n")
+    print(f"Si no se abre solo, pega esto en el navegador:\n{url}\n")
+    webbrowser.open(url)
+
+    print("Esperando…")
+    for _ in range(300):
+        if Recogida.codigo:
+            break
+        threading.Event().wait(1)
+    servidor.server_close()
 
     if not Recogida.codigo:
-        servidor = http.server.HTTPServer(("127.0.0.1", PUERTO), Recogida)
-        servidor.timeout = 180
-        hilo = threading.Thread(target=servidor.handle_request, daemon=True)
-        hilo.start()
-        webbrowser.open(url)
-        hilo.join(timeout=180)
-        servidor.server_close()
-
-    if not Recogida.codigo:
-        print(f"No se completó {etiqueta}.")
+        print("No llegó la autorización. Vuelve a intentarlo.")
         return 1
 
-    form = {
-        "client_id": cliente,
-        "code": Recogida.codigo,
-        "code_verifier": verifier,
-        "grant_type": "authorization_code",
-        "redirect_uri": destino,
-    }
-    if secreto:
-        form["client_secret"] = secreto
-    req = urllib.request.Request(
+    peticion = urllib.request.Request(
         "https://oauth2.googleapis.com/token",
-        data=urllib.parse.urlencode(form).encode(),
+        data=urllib.parse.urlencode({
+            "code": Recogida.codigo,
+            "client_id": cliente,
+            "client_secret": secreto,
+            "redirect_uri": destino,
+            "grant_type": "authorization_code",
+        }).encode(),
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            tok = json.load(r)
-    except urllib.error.HTTPError as e:
-        print("Google rechazó el código:", e.read().decode())
+        with urllib.request.urlopen(peticion, timeout=60) as r:
+            respuesta = json.loads(r.read())
+    except Exception as e:
+        print(f"Google no aceptó el intercambio: {e}")
         return 1
 
-    salida.parent.mkdir(parents=True, exist_ok=True)
-    salida.write_text(json.dumps({
+    duradero = respuesta.get("refresh_token")
+    if not duradero:
+        print("Google no devolvió el permiso duradero.")
+        print("Quita el acceso en myaccount.google.com/permissions y repite.")
+        return 1
+
+    SALIDA.write_text(json.dumps({
         "client_id": cliente,
         "client_secret": secreto,
-        "refresh_token": tok["refresh_token"],
+        "refresh_token": duradero,
         "scope": permiso,
     }, indent=2))
-    os.chmod(salida, 0o600)
-    print(f"✓ {etiqueta} conectado y guardado en {salida}")
-    return 0
+    SALIDA.chmod(0o600)
 
-
-def main() -> int:
-    yt_salida = AQUI / "credenciales" / "youtube.json"
-    if "--youtube" in sys.argv:
-        return autorizar_uno(SCOPE_YOUTUBE, yt_salida, "YouTube")
-    permiso, _ = alcance()
-    rc = autorizar_uno(permiso, SALIDA, "Google Drive")
-    if rc != 0:
-        return rc
-    if not yt_salida.is_file():
-        print("\nAhora autoriza tu canal de YouTube (Google exige pedirlo en una segunda ventana):")
-        autorizar_uno(SCOPE_YOUTUBE, yt_salida, "YouTube")
+    print(f"\nListo. Permiso guardado en {SALIDA.name}")
+    print("Ahora los clips subirán a TU Drive, con tu espacio.\n")
+    print("Reinicia el subidor:")
+    print("   docker compose up -d --build drive && docker compose logs -f drive")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

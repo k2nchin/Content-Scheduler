@@ -745,22 +745,9 @@ async def _create_task(request: Request, db: AsyncSession, attempt: SourceAttemp
         try:
             source_type = task_service.video_service.determine_source_type(raw_source["url"])
         except ValueError as exc:
-            from ...stream_source import live_channel_source
-            url_live = str(raw_source["url"]).strip()
-            if db is not None and live_channel_source(url_live) in {"youtube", "twitch", "kick"}:
-                from ...repositories import live_repository as live_repo
-                live = await live_repo.active_for_url(db, user_id, url_live)
-                if live is None:
-                    live = await live_repo.create_live(db, user_id, url_live, upload_options, 3)
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "code": "LIVE_RECORDING_STARTED",
-                        "message": "🔴 Es un directo en vivo: tu Mac ya empezó a grabarlo por trozos de 3 min. Cada trozo aparecerá solo en la lista de trabajos (/list) al cerrarse.",
-                        "live_id": live["id"],
-                    },
-                ) from None
-            if not url_live.lower().startswith(("http://", "https://")):
+            # Only rejected http(s) stream URLs are a 422 validation error.
+            # Local paths and other non-URL sources keep the historic 404.
+            if not str(raw_source["url"]).strip().lower().startswith(("http://", "https://")):
                 raise
             raise HTTPException(status_code=422, detail=str(exc)) from None
         if source_type == "youtube":
@@ -769,40 +756,22 @@ async def _create_task(request: Request, db: AsyncSession, attempt: SourceAttemp
             raw_source["url"] = canonical_youtube_url(raw_source["url"]) or raw_source["url"]
         source_title = raw_source.get("title")
         stream_metadata: Dict[str, Any] | None = None
-        try:
-            if source_type == "youtube":
-                metadata = await _preflight_youtube_source(
-                    raw_source["url"], billing["max_youtube_duration_seconds"]
-                )
-                source_title = source_title or metadata.get("title") or "YouTube Video"
-                duration_seconds = float(metadata["duration"])
-            elif source_type in {"twitch", "kick"}:
-                stream_metadata = await _preflight_stream_source(raw_source["url"], source_type, billing["max_youtube_duration_seconds"])
-                source_title = source_title or stream_metadata.get("title") or f"{source_type.title()} Video"
-                duration_seconds = float(stream_metadata["duration"])
-            else:
-                if await foreign_upload(db, raw_source["url"], user_id):
-                    raise HTTPException(status_code=404, detail="Video file not found")
-                duration_seconds = await _preflight_upload_source(
-                    raw_source["url"], user_id, billing["max_upload_duration_seconds"], db
-                )
-        except HTTPException as exc:
-            detail = exc.detail if isinstance(exc.detail, dict) else {}
-            if detail.get("code") == "VIDEO_DURATION_UNAVAILABLE" and db is not None and source_type in {"youtube", "twitch", "kick"}:
-                from ...repositories import live_repository as live_repo
-                url_live = raw_source["url"].strip()
-                live = await live_repo.active_for_url(db, user_id, url_live)
-                if live is None:
-                    live = await live_repo.create_live(db, user_id, url_live, upload_options, 3)
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "code": "LIVE_RECORDING_STARTED",
-                        "message": "🔴 Es un directo en vivo: tu Mac ya empezó a grabarlo por trozos de 3 min. Cada trozo aparecerá solo en la lista de trabajos (/list) al cerrarse.",
-                        "live_id": live["id"],
-                    },
-                ) from None
-            raise
+        if source_type == "youtube":
+            metadata = await _preflight_youtube_source(
+                raw_source["url"], billing["max_youtube_duration_seconds"]
+            )
+            source_title = source_title or metadata.get("title") or "YouTube Video"
+            duration_seconds = float(metadata["duration"])
+        elif source_type in {"twitch", "kick"}:
+            stream_metadata = await _preflight_stream_source(raw_source["url"], source_type, billing["max_youtube_duration_seconds"])
+            source_title = source_title or stream_metadata.get("title") or f"{source_type.title()} Video"
+            duration_seconds = float(stream_metadata["duration"])
+        else:
+            if await foreign_upload(db, raw_source["url"], user_id):
+                raise HTTPException(status_code=404, detail="Video file not found")
+            duration_seconds = await _preflight_upload_source(
+                raw_source["url"], user_id, billing["max_upload_duration_seconds"], db
+            )
 
         try:
             check_source_duration(workflow_spec, duration_seconds)

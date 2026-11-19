@@ -69,10 +69,6 @@
     "original": {
       "label": "Original",
       "hint": "Conserva la proporción del video original"
-    },
-    "vertical_streamer": {
-      "label": "Streamer (cámara + juego)",
-      "hint": "Cámara redondeada arriba y el juego abajo"
     }
   },
   "captions": "Subtítulos",
