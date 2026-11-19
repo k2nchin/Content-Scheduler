@@ -1,4 +1,0 @@
-# Un canal por línea. Solo canales tuyos o con permiso.
-# https://www.youtube.com/@tucanal
-# https://www.twitch.tv/tucanal
-# https://kick.com/tucanal

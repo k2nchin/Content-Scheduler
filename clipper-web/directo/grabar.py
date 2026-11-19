@@ -76,6 +76,11 @@ def subir_y_clipear(trozo: Path) -> None:
         log.error("No se pudo encargar el clipeo: %s %s", r.status_code, r.text[:200])
         return
     log.info("Clipeando el trozo: trabajo %s", (r.json() or {}).get("task_id", "?"))
+    try:
+        trozo.unlink(missing_ok=True)
+        log.info("Video grabado local %s eliminado para liberar espacio.", trozo.name)
+    except Exception as e:
+        log.warning("No se pudo borrar %s: %s", trozo.name, e)
 
 
 def main() -> int:
