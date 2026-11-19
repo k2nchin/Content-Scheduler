@@ -350,13 +350,43 @@ def titulo_ia(motivo: str, mensajes_recientes: list[str]) -> str | None:
 
 
 
+_CARPETAS_DRIVE: dict[str, str] = {}
+
+
+def _drive_carpeta(token: str, nombre: str, padre: str | None = None) -> str:
+    clave = f"{padre or 'root'}:{nombre}"
+    if clave in _CARPETAS_DRIVE:
+        return _CARPETAS_DRIVE[clave]
+    cab = {"Authorization": f"Bearer {token}"}
+    p_q = f"'{padre}' in parents and " if padre else "'root' in parents and "
+    q = urllib.parse.quote(f"name = '{nombre}' and {p_q}mimeType = 'application/vnd.google-apps.folder' and trashed = false")
+    req = urllib.request.Request(f"https://www.googleapis.com/drive/v3/files?q={q}&fields=files(id)", headers=cab)
+    with urllib.request.urlopen(req, timeout=20) as r:
+        files = (json.load(r) or {}).get("files") or []
+        if files:
+            _CARPETAS_DRIVE[clave] = files[0]["id"]
+            return _CARPETAS_DRIVE[clave]
+    meta = {"name": nombre, "mimeType": "application/vnd.google-apps.folder"}
+    if padre:
+        meta["parents"] = [padre]
+    req = urllib.request.Request(
+        "https://www.googleapis.com/drive/v3/files",
+        data=json.dumps(meta).encode(),
+        headers={**cab, "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=20) as r:
+        _CARPETAS_DRIVE[clave] = json.load(r)["id"]
+        return _CARPETAS_DRIVE[clave]
+
+
 def subir_a_drive_y_borrar(clip: Path, extra_borrar: Path | None, canal: str) -> None:
-    """Si hay credenciales en ../drive/credenciales/usuario.json, sube el clip a
-    Google Drive y borra los archivos grabados del iMac."""
+    """Sube el clip 9:16 a Google Drive (carpeta Content Scheduler/<canal>) y
+    borra inmediatamente los archivos grabados del iMac."""
     if os.getenv("DRIVE_SUBIR", "true").lower() == "false":
         return
     cred_path = Path(__file__).resolve().parent.parent / "drive" / "credenciales" / "usuario.json"
     if not cred_path.is_file():
+        log(canal, "⚠️ Falta autorizar Drive (python3 drive/autorizar.py). Conservo el clip en el Mac.")
         return
     try:
         d = json.loads(cred_path.read_text())
@@ -371,9 +401,10 @@ def subir_a_drive_y_borrar(clip: Path, extra_borrar: Path | None, canal: str) ->
         )
         with urllib.request.urlopen(req, timeout=20) as r:
             token = json.load(r)["access_token"]
-        carpeta = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+        raiz = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip() or _drive_carpeta(token, "Content Scheduler")
+        carpeta = _drive_carpeta(token, canal, raiz)
         boundary = f"===expres{int(time.time()*1000)}==="
-        meta_json = json.dumps({"name": clip.name, **({"parents": [carpeta]} if carpeta else {})}).encode()
+        meta_json = json.dumps({"name": clip.name, "parents": [carpeta]}).encode()
         cuerpo = (
             f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode()
             + meta_json
@@ -388,14 +419,13 @@ def subir_a_drive_y_borrar(clip: Path, extra_borrar: Path | None, canal: str) ->
         )
         with urllib.request.urlopen(up, timeout=300) as r:
             fid = json.load(r).get("id", "?")
-        log(canal, f"☁️  Subido a Google Drive ({fid}). Borrando material grabado del iMac…")
         if os.getenv("DRIVE_BORRAR_LOCAL", "true").lower() != "false":
             for f in (clip, extra_borrar, clip.with_suffix(".json")):
                 if f and f.exists():
                     f.unlink(missing_ok=True)
+        log(canal, f"☁️  Subido a Google Drive (Content Scheduler/{canal} · {fid}) y borrado del iMac ✓")
     except Exception as e:  # noqa: BLE001
         log(canal, f"No se pudo subir a Drive ({e}); conservo el clip en el iMac.")
-
 
 def cortar(g: Grabador, canal: str, motivo: str, puntaje: int = 85, textos_chat: list[str] | None = None) -> None:
     inicio = time.monotonic()
