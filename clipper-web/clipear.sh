@@ -21,12 +21,24 @@ if [ "${1:-}" = "--parar" ]; then
   exit 0
 fi
 
-for prog in ffmpeg yt-dlp; do
-  if ! command -v "$prog" >/dev/null 2>&1; then
-    echo "Instalando $prog con Homebrew…"
-    brew install "$prog"
-  fi
-done
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+mkdir -p "$HOME/.local/bin"
+
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  echo "Bajando ffmpeg precompilado para Mac (5 segundos, sin compilar con Homebrew)…"
+  curl -fL "https://evermeet.cx/ffmpeg/getrelease/zip" -o /tmp/ffmpeg.zip
+  unzip -qo /tmp/ffmpeg.zip -d "$HOME/.local/bin"
+  rm -f /tmp/ffmpeg.zip
+  chmod +x "$HOME/.local/bin/ffmpeg"
+  xattr -dr com.apple.quarantine "$HOME/.local/bin/ffmpeg" 2>/dev/null || true
+fi
+
+if ! command -v yt-dlp >/dev/null 2>&1; then
+  echo "Bajando yt-dlp precompilado para Mac (3 segundos)…"
+  curl -fL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" -o "$HOME/.local/bin/yt-dlp"
+  chmod +x "$HOME/.local/bin/yt-dlp"
+  xattr -dr com.apple.quarantine "$HOME/.local/bin/yt-dlp" 2>/dev/null || true
+fi
 
 if [ ! -f drive/credenciales/usuario.json ]; then
   echo "=== Paso único: autorizar tu cuenta de Google Drive ==="
@@ -46,7 +58,7 @@ if [ "${1:-}" = "--servicio" ]; then
   <key>Label</key><string>$ETIQUETA</string>
   <key>WorkingDirectory</key><string>$RAIZ</string>
   <key>EnvironmentVariables</key><dict>
-    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>CAMARA</key><string>${CAMARA:-arriba-derecha}</string>
     <key>DRIVE_SUBIR</key><string>true</string>
     <key>DRIVE_BORRAR_LOCAL</key><string>true</string>
